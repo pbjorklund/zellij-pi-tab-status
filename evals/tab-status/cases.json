@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "privacy": "public",
+  "cases": [
+    {
+      "id": "working-status-format",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "status formatters cycle frames and mark unseen completion"
+    },
+    {
+      "id": "reject-non-tui",
+      "layer": 2,
+      "category": "guard",
+      "expected_test": "isInteractiveZellij requires TUI mode and Zellij"
+    },
+    {
+      "id": "reject-different-cwd",
+      "layer": 2,
+      "category": "ownership",
+      "expected_test": "selectOwningPane ignores plugin collisions and different cwd tabs"
+    },
+    {
+      "id": "derive-title-in-process",
+      "layer": 2,
+      "category": "title",
+      "expected_test": "deriveTabTitle uses repo path and branch without an external helper"
+    }
+  ]
+}

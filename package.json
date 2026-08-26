@@ -1,0 +1,35 @@
+{
+  "name": "zellij-pi-tab-status",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Show PI activity and unseen completion in the owning Zellij tab title.",
+  "exports": {
+    ".": "./pi-extension.ts",
+    "./pi-extension": "./pi-extension.ts"
+  },
+  "files": [
+    "pi-extension.ts"
+  ],
+  "scripts": {
+    "test": "node --test test/*.mjs",
+    "eval": "python evals/tab-status/run.py"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/pbjorklund/zellij-pi-tab-status.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pbjorklund/zellij-pi-tab-status/issues"
+  },
+  "homepage": "https://github.com/pbjorklund/zellij-pi-tab-status#readme",
+  "pi": {
+    "extensions": [
+      "./pi-extension.ts"
+    ]
+  }
+}
