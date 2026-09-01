@@ -14,8 +14,9 @@ test("stripPiTabPrefix removes working, compacting, and done overlays", () => {
   assert.equal(status.stripPiTabPrefix("repo/path:branch"), "repo/path:branch");
 });
 
-test("status formatters cycle frames and mark unseen completion", () => {
+test("status formatters keep working stable and mark unseen completion", () => {
   assert.equal(status.formatWorkingTabName("repo:main", 0), "⠋ repo:main");
+  assert.equal(status.formatWorkingTabName("repo:main", 1), "⠋ repo:main");
   assert.equal(status.formatWorkingTabName("repo:main", 10), "⠋ repo:main");
   assert.equal(status.formatCompactingTabName("repo:main", 0), "◐ repo:main");
   assert.equal(status.formatDoneTabName("repo:main"), "● repo:main");

@@ -7,7 +7,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const execFileAsync = promisify(execFile);
 
 const COMMAND_TIMEOUT_MS = 2_000;
-const SPINNER_INTERVAL_MS = 500;
 const SEEN_POLL_INTERVAL_MS = 1_000;
 const BIND_RETRY_ATTEMPTS = 20;
 const BIND_RETRY_DELAY_MS = 100;
@@ -71,8 +70,8 @@ export function stripPiTabPrefix(name: string): string {
   return name;
 }
 
-export function formatWorkingTabName(baseName: string, frameIndex: number): string {
-  return `${SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length]} ${baseName}`;
+export function formatWorkingTabName(baseName: string, _frameIndex: number): string {
+  return `${SPINNER_FRAMES[0]} ${baseName}`;
 }
 
 export function formatCompactingTabName(baseName: string, frameIndex: number): string {
@@ -357,7 +356,6 @@ async function readTabById(tabId: string): Promise<ZellijTabInfo | null> {
 
 export default function zellijPiTabStatus(pi: ExtensionAPI) {
   let state: RuntimeState | null = null;
-  let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   let seenTimer: ReturnType<typeof setInterval> | null = null;
   const workTracker = createWorkTracker();
   let currentCtx: ExtensionContext | null = null;
@@ -460,9 +458,6 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
   }
 
   function stopSpinner() {
-    if (!spinnerTimer) return;
-    clearInterval(spinnerTimer);
-    spinnerTimer = null;
     frameIndex = 0;
   }
 
@@ -488,13 +483,6 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
     stopSeenPolling();
     await refreshBaseName(ctx);
     state.doneUnseen = false;
-
-    if (!spinnerTimer) {
-      spinnerTimer = setInterval(() => {
-        if (!state) return;
-        void renameTab(formatWorkingTabName(state.baseName, frameIndex++));
-      }, SPINNER_INTERVAL_MS);
-    }
 
     await renameTab(formatWorkingTabName(state.baseName, frameIndex++));
   }
