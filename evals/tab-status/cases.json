@@ -25,6 +25,36 @@
       "layer": 2,
       "category": "title",
       "expected_test": "deriveTabTitle uses repo path and branch without an external helper"
+    },
+    {
+      "id": "mid-run-compaction-stays-working",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: mid-run threshold compaction keeps the working marker"
+    },
+    {
+      "id": "retry-gaps-stay-working",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: auto-retry and queued follow-up gaps do not mark done"
+    },
+    {
+      "id": "compaction-failure-recovers",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: failed compaction recovers and does not stay stuck"
+    },
+    {
+      "id": "overflow-retry-stays-working",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: overflow compaction retry keeps work marked until settled"
+    },
+    {
+      "id": "active-tab-settle-restores-title",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: active tab restores the base name instead of marking done"
     }
   ]
 }

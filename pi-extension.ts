@@ -6,6 +6,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 const execFileAsync = promisify(execFile);
 
+type ExecFileAsyncFn = typeof execFileAsync;
+
 const COMMAND_TIMEOUT_MS = 2_000;
 const SEEN_POLL_INTERVAL_MS = 1_000;
 const BIND_RETRY_ATTEMPTS = 20;
@@ -52,9 +54,11 @@ type SubagentLifecycleEvent = {
   id?: unknown;
 };
 
-type CompactionLifecycleEvent = {
-  willRetry?: unknown;
+export type ZellijTabStatusOptions = {
+  execFileAsync?: ExecFileAsyncFn;
 };
+
+const defaultExecFileAsync = execFileAsync;
 
 export function stripPiTabPrefix(name: string): string {
   const trimmed = name.trimStart();
@@ -160,10 +164,6 @@ export function parseSubagentId(event: SubagentLifecycleEvent): string | null {
   return typeof event.id === "string" && event.id.trim().length > 0 ? event.id : null;
 }
 
-export function parseCompactionWillRetry(event: CompactionLifecycleEvent): boolean | null {
-  return typeof event.willRetry === "boolean" ? event.willRetry : null;
-}
-
 export function createWorkTracker() {
   let parentAgentActive = false;
   const activeSubagentIds = new Set<string>();
@@ -200,7 +200,12 @@ export function isInteractiveZellij(ctx: Pick<ExtensionContext, "hasUI" | "mode"
   return ctx.mode === "tui" && ctx.hasUI && Boolean(process.env.ZELLIJ);
 }
 
-async function run(command: string, args: string[], options: { cwd?: string } = {}) {
+async function runCommand(
+  execFileAsync: ExecFileAsyncFn,
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+) {
   return execFileAsync(command, args, {
     cwd: options.cwd,
     timeout: COMMAND_TIMEOUT_MS,
@@ -229,11 +234,15 @@ export function formatGitTabTitle(path: string, branch: string, maxLength = MAX_
   return `${truncateWithEllipsis(path, pathLength)}:${shortBranch}`;
 }
 
-export async function deriveTabTitle(directory: string, home = homedir()): Promise<string> {
+export async function deriveTabTitle(
+  directory: string,
+  home = homedir(),
+  execFileAsync: ExecFileAsyncFn = defaultExecFileAsync,
+): Promise<string> {
   try {
     const [{ stdout: rootStdout }, { stdout: prefixStdout }] = await Promise.all([
-      run("git", ["rev-parse", "--show-toplevel"], { cwd: directory }),
-      run("git", ["rev-parse", "--show-prefix"], { cwd: directory }),
+      runCommand(execFileAsync, "git", ["rev-parse", "--show-toplevel"], { cwd: directory }),
+      runCommand(execFileAsync, "git", ["rev-parse", "--show-prefix"], { cwd: directory }),
     ]);
     const root = rootStdout.trim();
     const prefix = prefixStdout.trim().replace(/\/$/, "");
@@ -241,11 +250,11 @@ export async function deriveTabTitle(directory: string, home = homedir()): Promi
 
     let branch = "HEAD";
     try {
-      const { stdout } = await run("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: directory });
+      const { stdout } = await runCommand(execFileAsync, "git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: directory });
       branch = stdout.trim() || branch;
     } catch {
       try {
-        const { stdout } = await run("git", ["rev-parse", "--short", "HEAD"], { cwd: directory });
+        const { stdout } = await runCommand(execFileAsync, "git", ["rev-parse", "--short", "HEAD"], { cwd: directory });
         branch = stdout.trim() || branch;
       } catch {
         // Keep HEAD for an unborn or otherwise unresolved repository.
@@ -319,11 +328,14 @@ export function selectOwningPane(
     .sort((left, right) => right.score - left.score)[0]?.pane ?? null;
 }
 
-async function readOwningTab(ctx: ExtensionContext): Promise<OwningTabInfo | null> {
+async function readOwningTabWith(
+  execFileAsync: ExecFileAsyncFn,
+  ctx: ExtensionContext,
+): Promise<OwningTabInfo | null> {
   try {
     const [{ stdout: panesStdout }, tabsResult] = await Promise.all([
-      run("zellij", ["action", "list-panes", "--all", "--json", "--command", "--state"]),
-      run("zellij", ["action", "list-tabs", "--json", "--state"]).catch(() => ({ stdout: "[]" })),
+      runCommand(execFileAsync, "zellij", ["action", "list-panes", "--all", "--json", "--command", "--state"]),
+      runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]).catch(() => ({ stdout: "[]" })),
     ]);
 
     const pane = selectOwningPane(
@@ -345,30 +357,41 @@ async function readOwningTab(ctx: ExtensionContext): Promise<OwningTabInfo | nul
   }
 }
 
-async function readTabById(tabId: string): Promise<ZellijTabInfo | null> {
+async function readTabByIdWith(
+  execFileAsync: ExecFileAsyncFn,
+  tabId: string,
+): Promise<ZellijTabInfo | null> {
   try {
-    const { stdout } = await run("zellij", ["action", "list-tabs", "--json", "--state"]);
+    const { stdout } = await runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]);
     return parseTabList(stdout).find((tab) => tab.tabId === tabId) ?? null;
   } catch {
     return null;
   }
 }
 
-export default function zellijPiTabStatus(pi: ExtensionAPI) {
+export default function zellijPiTabStatus(
+  pi: ExtensionAPI,
+  options: ZellijTabStatusOptions = {},
+) {
+  const execFileAsync = options.execFileAsync ?? defaultExecFileAsync;
+  const run = (command: string, args: string[], runOptions: { cwd?: string } = {}) =>
+    runCommand(execFileAsync, command, args, runOptions);
+  const readOwningTab = (ctx: ExtensionContext) => readOwningTabWith(execFileAsync, ctx);
+  const readTabById = (tabId: string) => readTabByIdWith(execFileAsync, tabId);
+
   let state: RuntimeState | null = null;
   let seenTimer: ReturnType<typeof setInterval> | null = null;
   const workTracker = createWorkTracker();
   let currentCtx: ExtensionContext | null = null;
   let frameIndex = 0;
   let compactionActive = false;
-  let compactionWillRetry: boolean | null = null;
   let pendingName: string | null = null;
   let renameDrain: Promise<void> | null = null;
 
   async function resolveBaseName(cwd: string | null, fallbackName: string): Promise<string> {
     if (!cwd) return stripPiTabPrefix(fallbackName);
 
-    const title = await deriveTabTitle(cwd);
+    const title = await deriveTabTitle(cwd, homedir(), execFileAsync);
     return title.length > 0 ? title : stripPiTabPrefix(fallbackName);
   }
 
@@ -487,9 +510,8 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
     await renameTab(formatWorkingTabName(state.baseName, frameIndex++));
   }
 
-  async function showCompacting(ctx: ExtensionContext, willRetry: boolean | null) {
+  async function showCompacting(ctx: ExtensionContext) {
     compactionActive = true;
-    compactionWillRetry = willRetry;
     if (!(await ensureOwningTab(ctx, BIND_RETRY_ATTEMPTS)) || !state) return;
 
     stopSeenPolling();
@@ -497,27 +519,25 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
     await refreshBaseName(ctx);
     state.doneUnseen = false;
 
-    // Compaction can finish after the agent turn is already over. Do not run a
-    // second tab-name ticker here; clear any active work ticker and keep the
-    // base tab name until compaction resolves.
+    // PI can compact mid-run between tool calls and after an aborted turn.
+    // Show the base name while compaction runs; session_compact and
+    // session_compact_failed restore the right marker afterwards.
     await renameTab(state.baseName);
   }
 
-  async function finishCompacting(ctx: ExtensionContext, willRetry: boolean | null) {
+  async function finishCompacting(ctx: ExtensionContext) {
     compactionActive = false;
-    compactionWillRetry = null;
     stopSpinner();
 
-    if (willRetry === false) {
-      workTracker.endParentAgent();
-    }
-
+    // A compaction that ends while work is still active - including mid-run
+    // threshold compaction - must restore the working marker. The done
+    // marker is decided only by agent_settled, never here.
     if (workTracker.hasActiveWork()) {
       await showWorking(ctx);
       return;
     }
 
-    await finishIfIdle(ctx);
+    await restoreBase(ctx);
   }
 
   async function finishIfIdle(ctx: ExtensionContext) {
@@ -562,20 +582,28 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
     await showWorking(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  // agent_end only ends one low-level run: PI may still auto-retry,
+  // compact-and-retry, or continue queued follow-up messages afterwards.
+  // The done marker is decided only when the whole run settles.
+  pi.on("agent_settled", async (_event, ctx) => {
     currentCtx = ctx;
     workTracker.endParentAgent();
     await finishIfIdle(ctx);
   });
 
-  pi.on("session_before_compact", async (event, ctx) => {
+  pi.on("session_before_compact", async (_event, ctx) => {
     currentCtx = ctx;
-    await showCompacting(ctx, parseCompactionWillRetry(event));
+    await showCompacting(ctx);
   });
 
-  pi.on("session_compact", async (event, ctx) => {
+  pi.on("session_compact", async (_event, ctx) => {
     currentCtx = ctx;
-    await finishCompacting(ctx, parseCompactionWillRetry(event) ?? compactionWillRetry);
+    await finishCompacting(ctx);
+  });
+
+  pi.on("session_compact_failed", async (_event, ctx) => {
+    currentCtx = ctx;
+    await finishCompacting(ctx);
   });
 
   pi.events?.on?.("subagents:started", (event: SubagentLifecycleEvent) => {
@@ -603,7 +631,6 @@ export default function zellijPiTabStatus(pi: ExtensionAPI) {
     await restoreBase(ctx);
     workTracker.reset();
     compactionActive = false;
-    compactionWillRetry = null;
     state = null;
     currentCtx = null;
     pendingName = null;
