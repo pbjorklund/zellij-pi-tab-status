@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 type ExecFileAsyncFn = typeof execFileAsync;
 
 const COMMAND_TIMEOUT_MS = 2_000;
+const SPINNER_INTERVAL_MS = 500;
 const SEEN_POLL_INTERVAL_MS = 1_000;
 const BIND_RETRY_ATTEMPTS = 20;
 const BIND_RETRY_DELAY_MS = 100;
@@ -56,6 +57,7 @@ type SubagentLifecycleEvent = {
 
 export type ZellijTabStatusOptions = {
   execFileAsync?: ExecFileAsyncFn;
+  spinnerIntervalMs?: number;
 };
 
 const defaultExecFileAsync = execFileAsync;
@@ -74,8 +76,8 @@ export function stripPiTabPrefix(name: string): string {
   return name;
 }
 
-export function formatWorkingTabName(baseName: string, _frameIndex: number): string {
-  return `${SPINNER_FRAMES[0]} ${baseName}`;
+export function formatWorkingTabName(baseName: string, frameIndex: number): string {
+  return `${SPINNER_FRAMES[frameIndex % SPINNER_FRAMES.length]} ${baseName}`;
 }
 
 export function formatCompactingTabName(baseName: string, frameIndex: number): string {
@@ -374,6 +376,7 @@ export default function zellijPiTabStatus(
   options: ZellijTabStatusOptions = {},
 ) {
   const execFileAsync = options.execFileAsync ?? defaultExecFileAsync;
+  const spinnerIntervalMs = options.spinnerIntervalMs ?? SPINNER_INTERVAL_MS;
   const run = (command: string, args: string[], runOptions: { cwd?: string } = {}) =>
     runCommand(execFileAsync, command, args, runOptions);
   const readOwningTab = (ctx: ExtensionContext) => readOwningTabWith(execFileAsync, ctx);
@@ -381,6 +384,7 @@ export default function zellijPiTabStatus(
 
   let state: RuntimeState | null = null;
   let seenTimer: ReturnType<typeof setInterval> | null = null;
+  let spinnerTimer: ReturnType<typeof setInterval> | null = null;
   const workTracker = createWorkTracker();
   let currentCtx: ExtensionContext | null = null;
   let frameIndex = 0;
@@ -447,7 +451,16 @@ export default function zellijPiTabStatus(
         await run("zellij", ["action", "rename-tab-by-id", state.tabId, nextName]);
         state.lastWrittenName = nextName;
       } catch {
-        // Best effort only. Tab naming must never interrupt PI work.
+        // Best effort only, but retry once: a dropped rename leaves the tab
+        // stuck on a stale marker until the next lifecycle event.
+        try {
+          await sleep(BIND_RETRY_DELAY_MS);
+          await run("zellij", ["action", "rename-tab-by-id", state.tabId, nextName]);
+          state.lastWrittenName = nextName;
+        } catch {
+          // Give up; the next lifecycle event rewrites the name anyway.
+          state.lastWrittenName = null;
+        }
       }
     }
   }
@@ -481,7 +494,22 @@ export default function zellijPiTabStatus(
   }
 
   function stopSpinner() {
+    if (!spinnerTimer) return;
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
     frameIndex = 0;
+  }
+
+  function startSpinner() {
+    stopSpinner();
+    spinnerTimer = setInterval(() => {
+      if (!state || !workTracker.hasActiveWork() || compactionActive) {
+        stopSpinner();
+        return;
+      }
+      void renameTab(formatWorkingTabName(state.baseName, frameIndex++));
+    }, spinnerIntervalMs);
+    spinnerTimer.unref?.();
   }
 
   function stopSeenPolling() {
@@ -508,6 +536,7 @@ export default function zellijPiTabStatus(
     state.doneUnseen = false;
 
     await renameTab(formatWorkingTabName(state.baseName, frameIndex++));
+    startSpinner();
   }
 
   async function showCompacting(ctx: ExtensionContext) {
@@ -542,7 +571,7 @@ export default function zellijPiTabStatus(
 
   async function finishIfIdle(ctx: ExtensionContext) {
     if (compactionActive) return;
-    if (!(await ensureOwningTab(ctx)) || !state) return;
+    if (!(await ensureOwningTab(ctx, BIND_RETRY_ATTEMPTS)) || !state) return;
 
     if (workTracker.hasActiveWork()) return;
 
@@ -569,6 +598,7 @@ export default function zellijPiTabStatus(
         if (tab?.active) await restoreBase(ctx);
       })();
     }, SEEN_POLL_INTERVAL_MS);
+    seenTimer.unref?.();
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -628,6 +658,7 @@ export default function zellijPiTabStatus(
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    stopSpinner();
     await restoreBase(ctx);
     workTracker.reset();
     compactionActive = false;

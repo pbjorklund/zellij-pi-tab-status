@@ -14,9 +14,9 @@ test("stripPiTabPrefix removes working, compacting, and done overlays", () => {
   assert.equal(status.stripPiTabPrefix("repo/path:branch"), "repo/path:branch");
 });
 
-test("status formatters keep working stable and mark unseen completion", () => {
+test("status formatters cycle frames and mark unseen completion", () => {
   assert.equal(status.formatWorkingTabName("repo:main", 0), "⠋ repo:main");
-  assert.equal(status.formatWorkingTabName("repo:main", 1), "⠋ repo:main");
+  assert.equal(status.formatWorkingTabName("repo:main", 1), "⠙ repo:main");
   assert.equal(status.formatWorkingTabName("repo:main", 10), "⠋ repo:main");
   assert.equal(status.formatCompactingTabName("repo:main", 0), "◐ repo:main");
   assert.equal(status.formatDoneTabName("repo:main"), "● repo:main");
@@ -146,7 +146,7 @@ test("deriveTabTitle falls back to a directory name outside git", async () => {
   }
 });
 
-function createLifecycleHarness({ tabActive = false } = {}) {
+function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
   const renames = [];
   const handlers = new Map();
   const panes = JSON.stringify([
@@ -200,7 +200,7 @@ function createLifecycleHarness({ tabActive = false } = {}) {
     },
   };
 
-  status.default(pi, { execFileAsync });
+  status.default(pi, { execFileAsync, spinnerIntervalMs: spinnerIntervalMs ?? 2 ** 30 });
 
   const ctx = {
     cwd: "/repo",
@@ -238,7 +238,7 @@ test("lifecycle: mid-run threshold compaction keeps the working marker", async (
 
     await fire("session_start");
     await fire("agent_start");
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     // PI 0.84.4 can compact between tool calls in the same run: no agent_end,
     // no retry. The run is still active, so the done marker must not appear.
@@ -246,7 +246,7 @@ test("lifecycle: mid-run threshold compaction keeps the working marker", async (
     assert.equal(renames.at(-1), "repo:main");
 
     await fire("session_compact", { reason: "threshold", willRetry: false });
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     // Only the settled end of the whole run may mark done.
     await fire("agent_settled");
@@ -270,14 +270,14 @@ test("lifecycle: auto-retry and queued follow-up gaps do not mark done", async (
     // agent_end of a low-level run that PI will continue: no done marker.
     assert.equal(hasHandler("agent_end"), false);
     await publish("agent_end", { messages: [], willRetry: true });
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     await fire("agent_start");
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     await publish("agent_end", { messages: [], willRetry: false });
     // Still no done marker: settlement decides, and queued follow-ups may exist.
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     await fire("agent_settled");
     assert.match(renames.at(-1), /^● repo:main$/);
@@ -306,7 +306,7 @@ test("lifecycle: failed compaction recovers and does not stay stuck", async (t) 
     });
     // Compaction ended with work still active: the working marker must return,
     // and later events must not be blocked by stale compaction state.
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     // A new run after the failed compaction still animates.
     await fire("agent_settled");
@@ -335,7 +335,7 @@ test("lifecycle: overflow compaction retry keeps work marked until settled", asy
     assert.equal(renames.at(-1), "repo:main");
 
     await fire("session_compact", { reason: "overflow", willRetry: true });
-    assert.match(renames.at(-1), /^⠋ repo:main$/);
+    assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
 
     await fire("agent_start");
     await publish("agent_end", { messages: [], willRetry: false });
@@ -359,6 +359,30 @@ test("lifecycle: active tab restores the base name instead of marking done", asy
     await fire("agent_settled");
 
     assert.equal(renames.at(-1), "repo:main");
+  } finally {
+    if (oldZellij === undefined) delete process.env.ZELLIJ;
+    else process.env.ZELLIJ = oldZellij;
+  }
+});
+
+test("lifecycle: working marker animates while work stays active", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, renames } = createLifecycleHarness({ tabActive: false, spinnerIntervalMs: 5 });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    const before = renames.at(-1);
+
+    // The spinner timer writes new frames while the parent agent is active.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const frames = renames.filter((name) => name !== before);
+    assert.ok(frames.length >= 2, `expected spinner frames, got: ${JSON.stringify(renames)}`);
+
+    await fire("agent_settled");
+    assert.match(renames.at(-1), /^● repo:main$/);
   } finally {
     if (oldZellij === undefined) delete process.env.ZELLIJ;
     else process.env.ZELLIJ = oldZellij;

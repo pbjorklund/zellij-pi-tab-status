@@ -6,7 +6,7 @@
       "id": "working-status-format",
       "layer": 2,
       "category": "activity",
-      "expected_test": "status formatters keep working stable and mark unseen completion"
+      "expected_test": "status formatters cycle frames and mark unseen completion"
     },
     {
       "id": "reject-non-tui",
