@@ -10,7 +10,10 @@ type ExecFileAsyncFn = typeof execFileAsync;
 
 const COMMAND_TIMEOUT_MS = 2_000;
 const SPINNER_INTERVAL_MS = 500;
-const SEEN_POLL_INTERVAL_MS = 1_000;
+const SEEN_POLL_FIRST_DELAY_MS = 250;
+const SEEN_POLL_MAX_DELAY_MS = 2_000;
+const VALIDATION_TTL_MS = 5_000;
+const TITLE_CACHE_TTL_MS = 30_000;
 const BIND_RETRY_ATTEMPTS = 20;
 const BIND_RETRY_DELAY_MS = 100;
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
@@ -30,6 +33,7 @@ type RuntimeState = {
   baseCwd: string | null;
   lastWrittenName: string | null;
   doneUnseen: boolean;
+  validatedAt: number;
 };
 
 type OwningTabInfo = ZellijTabInfo & {
@@ -58,6 +62,8 @@ type SubagentLifecycleEvent = {
 export type ZellijTabStatusOptions = {
   execFileAsync?: ExecFileAsyncFn;
   spinnerIntervalMs?: number;
+  seenPollFirstDelayMs?: number;
+  now?: () => number;
 };
 
 const defaultExecFileAsync = execFileAsync;
@@ -377,6 +383,8 @@ export default function zellijPiTabStatus(
 ) {
   const execFileAsync = options.execFileAsync ?? defaultExecFileAsync;
   const spinnerIntervalMs = options.spinnerIntervalMs ?? SPINNER_INTERVAL_MS;
+  const seenPollFirstDelayMs = options.seenPollFirstDelayMs ?? SEEN_POLL_FIRST_DELAY_MS;
+  const now = options.now ?? (() => Date.now());
   const run = (command: string, args: string[], runOptions: { cwd?: string } = {}) =>
     runCommand(execFileAsync, command, args, runOptions);
   const readOwningTab = (ctx: ExtensionContext) => readOwningTabWith(execFileAsync, ctx);
@@ -391,11 +399,21 @@ export default function zellijPiTabStatus(
   let compactionActive = false;
   let pendingName: string | null = null;
   let renameDrain: Promise<void> | null = null;
+  const titleCache = new Map<string, { title: string; at: number }>();
+
+  async function cachedTabTitle(cwd: string): Promise<string> {
+    const hit = titleCache.get(cwd);
+    if (hit && now() - hit.at < TITLE_CACHE_TTL_MS) return hit.title;
+
+    const title = await deriveTabTitle(cwd, homedir(), execFileAsync);
+    titleCache.set(cwd, { title, at: now() });
+    return title;
+  }
 
   async function resolveBaseName(cwd: string | null, fallbackName: string): Promise<string> {
     if (!cwd) return stripPiTabPrefix(fallbackName);
 
-    const title = await deriveTabTitle(cwd, homedir(), execFileAsync);
+    const title = await cachedTabTitle(cwd);
     return title.length > 0 ? title : stripPiTabPrefix(fallbackName);
   }
 
@@ -411,26 +429,47 @@ export default function zellijPiTabStatus(
       baseCwd,
       lastWrittenName: tab.name,
       doneUnseen: false,
+      validatedAt: now(),
     };
 
     if (tab.name !== baseName) await renameTab(baseName);
     return true;
   }
 
-  async function ensureOwningTab(ctx: ExtensionContext, attempts = 1): Promise<boolean> {
+  let bindInFlight: Promise<boolean> | null = null;
+
+  function ensureOwningTab(ctx: ExtensionContext, attempts = 1): Promise<boolean> {
+    // Concurrent bind attempts race each other into duplicate zellij spawns;
+    // share the in-flight bind instead.
+    bindInFlight ??= ensureOwningTabInner(ctx, attempts).finally(() => {
+      bindInFlight = null;
+    });
+    return bindInFlight;
+  }
+
+  async function ensureOwningTabInner(ctx: ExtensionContext, attempts: number): Promise<boolean> {
     if (!isInteractiveZellij(ctx)) return false;
 
     if (state) {
+      // Re-validate the pane-to-tab binding only when the cache is stale.
+      // Zellij commands are process spawns (~40-70ms each); re-checking on
+      // every event made each marker update cost three spawns.
+      if (now() - state.validatedAt < VALIDATION_TTL_MS) return true;
+
       const owningTab = await readOwningTab(ctx);
       if (owningTab) {
         const sameTab = owningTab.tabId === state.tabId;
         const sameCwd = pathsMatch(owningTab.paneCwd, state.baseCwd ?? ctx.cwd);
-        if (sameTab && sameCwd && (await readTabById(state.tabId))) return true;
+        if (sameTab && sameCwd) {
+          state.validatedAt = now();
+          return true;
+        }
 
         // PI panes can be moved between tabs after startup. Rebind instead of
         // keeping a stale tab id that would animate an unrelated tab.
         state = null;
       } else if (await readTabById(state.tabId)) {
+        state.validatedAt = now();
         return true;
       }
     }
@@ -459,7 +498,10 @@ export default function zellijPiTabStatus(
           state.lastWrittenName = nextName;
         } catch {
           // Give up; the next lifecycle event rewrites the name anyway.
+          // A failed rename also means the tab binding may be stale, so
+          // drop the validation cache and the write cache.
           state.lastWrittenName = null;
+          state.validatedAt = Number.NEGATIVE_INFINITY;
         }
       }
     }
@@ -484,12 +526,19 @@ export default function zellijPiTabStatus(
     }
   }
 
-  async function refreshBaseName(ctx: ExtensionContext) {
+  async function refreshBaseName(_ctx: ExtensionContext) {
     if (!state) return;
+
+    // The git-derived title only changes on branch switches; refetching it
+    // on every event cost three git spawns per marker update.
+    if (state.baseCwd) {
+      state.baseName = await cachedTabTitle(state.baseCwd);
+      return;
+    }
 
     const tab = await readTabById(state.tabId);
     if (tab) {
-      state.baseName = await resolveBaseName(state.baseCwd ?? ctx.cwd, tab.name);
+      state.baseName = stripPiTabPrefix(tab.name);
     }
   }
 
@@ -514,7 +563,7 @@ export default function zellijPiTabStatus(
 
   function stopSeenPolling() {
     if (!seenTimer) return;
-    clearInterval(seenTimer);
+    clearTimeout(seenTimer);
     seenTimer = null;
   }
 
@@ -590,15 +639,30 @@ export default function zellijPiTabStatus(
   }
 
   function startSeenPolling(ctx: ExtensionContext) {
+    // A fixed fast poll costs 4 zellij spawns per second for every unviewed
+    // done tab. Poll with exponential backoff instead: fast pickup when the
+    // user is about to switch, near-idle once the tab has stayed unseen.
     stopSeenPolling();
-    seenTimer = setInterval(() => {
-      void (async () => {
+    let delayMs = seenPollFirstDelayMs;
+    const poll = () => {
+      seenTimer = setTimeout(async () => {
         if (!state?.doneUnseen) return;
-        const tab = await readTabById(state.tabId);
-        if (tab?.active) await restoreBase(ctx);
-      })();
-    }, SEEN_POLL_INTERVAL_MS);
-    seenTimer.unref?.();
+        try {
+          const tab = await readTabById(state.tabId);
+          if (tab?.active) {
+            await restoreBase(ctx);
+            return;
+          }
+        } finally {
+          if (state?.doneUnseen) {
+            delayMs = Math.min(delayMs * 2, SEEN_POLL_MAX_DELAY_MS);
+            poll();
+          }
+        }
+      }, delayMs);
+      seenTimer.unref?.();
+    };
+    poll();
   }
 
   pi.on("session_start", async (_event, ctx) => {

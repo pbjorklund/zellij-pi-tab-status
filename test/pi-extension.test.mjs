@@ -146,8 +146,20 @@ test("deriveTabTitle falls back to a directory name outside git", async () => {
   }
 });
 
-function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
+function restoreZellijEnv(oldZellij) {
+  if (oldZellij === undefined) delete process.env.ZELLIJ;
+  else process.env.ZELLIJ = oldZellij;
+}
+
+function createLifecycleHarness({
+  tabActive = false,
+  spinnerIntervalMs,
+  failRenames = 0,
+  seenPollFirstDelayMs,
+} = {}) {
   const renames = [];
+  const spawnCount = { git: 0, zellij: 0, panes: 0, tabs: 0, renames: 0, renameFailures: 0 };
+  let clockMs = 0;
   const handlers = new Map();
   const panes = JSON.stringify([
     {
@@ -169,6 +181,7 @@ function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
 
   const execFileAsync = async (command, args) => {
     if (command === "git") {
+      spawnCount.git += 1;
       const subcommand = args[0];
       if (subcommand === "rev-parse") {
         if (args[1] === "--show-toplevel") return { stdout: "/repo" };
@@ -179,10 +192,22 @@ function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
       throw new Error(`unexpected git args: ${args.join(" ")}`);
     }
     if (command !== "zellij") throw new Error(`unexpected command: ${command}`);
+    spawnCount.zellij += 1;
     const action = args[1];
-    if (action === "list-panes") return { stdout: panes };
-    if (action === "list-tabs") return { stdout: tabs() };
+    if (action === "list-panes") {
+      spawnCount.panes += 1;
+      return { stdout: panes };
+    }
+    if (action === "list-tabs") {
+      spawnCount.tabs += 1;
+      return { stdout: tabs() };
+    }
     if (action === "rename-tab-by-id") {
+      spawnCount.renames += 1;
+      if (spawnCount.renameFailures < failRenames) {
+        spawnCount.renameFailures += 1;
+        throw new Error("zellij action failed");
+      }
       renames.push(args[3]);
       return { stdout: "" };
     }
@@ -200,7 +225,12 @@ function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
     },
   };
 
-  status.default(pi, { execFileAsync, spinnerIntervalMs: spinnerIntervalMs ?? 2 ** 30 });
+  status.default(pi, {
+    execFileAsync,
+    spinnerIntervalMs: spinnerIntervalMs ?? 2 ** 30,
+    seenPollFirstDelayMs,
+    now: () => clockMs,
+  });
 
   const ctx = {
     cwd: "/repo",
@@ -226,6 +256,10 @@ function createLifecycleHarness({ tabActive = false, spinnerIntervalMs } = {}) {
     publish,
     renames,
     hasHandler: (eventName) => handlers.has(eventName),
+    spawnCount,
+    advanceClock: (ms) => {
+      clockMs += ms;
+    },
   };
 }
 
@@ -386,5 +420,115 @@ test("lifecycle: working marker animates while work stays active", async (t) => 
   } finally {
     if (oldZellij === undefined) delete process.env.ZELLIJ;
     else process.env.ZELLIJ = oldZellij;
+  }
+});
+
+test("perf: settle within TTL reuses the binding with no panes or git spawns", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, renames, spawnCount, advanceClock } = createLifecycleHarness({ tabActive: false });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    const before = { ...spawnCount };
+
+    advanceClock(1_000); // inside both the binding TTL and the title TTL
+    await fire("agent_settled");
+
+    assert.equal(spawnCount.panes, before.panes, "no panes re-validation within TTL");
+    assert.equal(spawnCount.git, before.git, "no git spawns within title TTL");
+    assert.match(renames.at(-1), /^● repo:main$/);
+  } finally {
+    restoreZellijEnv(oldZellij);
+  }
+});
+
+test("perf: stale binding re-validates with exactly one panes fetch", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, spawnCount, advanceClock } = createLifecycleHarness({ tabActive: false });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    const before = { ...spawnCount };
+
+    advanceClock(6_000); // past the validation TTL
+    await fire("agent_settled");
+
+    assert.equal(spawnCount.panes - before.panes, 1, "one panes fetch to re-validate");
+    assert.equal(spawnCount.tabs - before.tabs, 2, "active check + name refresh");
+  } finally {
+    restoreZellijEnv(oldZellij);
+  }
+});
+
+test("perf: stale title cache refetches git exactly once", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, spawnCount, advanceClock } = createLifecycleHarness({ tabActive: false });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    const before = { ...spawnCount };
+
+    advanceClock(31_000); // past the title TTL
+    await fire("agent_settled");
+
+    assert.equal(spawnCount.git - before.git, 3, "one title derivation = 3 git spawns");
+  } finally {
+    restoreZellijEnv(oldZellij);
+  }
+});
+
+test("perf: failed rename invalidates the binding so the next event rebinds", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, spawnCount } = createLifecycleHarness({ tabActive: false, failRenames: 2 });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    assert.equal(spawnCount.renameFailures, 2, "both rename attempts failed");
+
+    await fire("agent_settled");
+    assert.ok(
+      spawnCount.panes >= 2,
+      `expected re-validation spawn, got panes=${spawnCount.panes}`,
+    );
+  } finally {
+    restoreZellijEnv(oldZellij);
+  }
+});
+
+test("perf: unviewed done tab polls with backoff, not a fixed flood", async (t) => {
+  const oldZellij = process.env.ZELLIJ;
+  process.env.ZELLIJ = "0";
+  try {
+    const { fire, spawnCount } = createLifecycleHarness({
+      tabActive: false,
+      seenPollFirstDelayMs: 5,
+    });
+    t.after(() => fire("session_shutdown"));
+
+    await fire("session_start");
+    await fire("agent_start");
+    await fire("agent_settled");
+    const afterSettled = spawnCount.tabs;
+
+    // A fixed 5ms interval would fire ~20 polls in 100ms; backoff
+    // (5,10,20,40,80) fires 5.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const polls = spawnCount.tabs - afterSettled;
+    assert.ok(polls >= 4, `expected the poller to run, saw ${polls}`);
+    assert.ok(polls <= 8, `expected backoff, saw ${polls} polls in 100ms`);
+  } finally {
+    restoreZellijEnv(oldZellij);
   }
 });

@@ -24,6 +24,8 @@ Then run `pi update` or restart PI and approve package installation when prompte
 - Finds the owning tab from `ZELLIJ_PANE_ID`, pane working directory, and Zellij application state.
 - Uses `repository/path:branch` for Git worktrees and the directory name elsewhere.
 - Keeps the working spinner running while the parent agent or tracked subagents are working.
+- Caches the tab binding and Git title, so routine marker updates spawn no extra processes.
+- Polls unviewed done tabs with exponential backoff to stay responsive without spawning constantly.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
 - Clears the marker during compaction, then restores the correct state after success or failure.
 - Marks completed work in inactive tabs with `●` only after PI emits `agent_settled`.
@@ -41,7 +43,7 @@ npm test
 npm run eval
 ```
 
-The eval wrapper records no model output and makes no network calls. It verifies title derivation, tab ownership, lifecycle handling, and non-Zellij guards through the Node test suite.
+The eval wrapper records no model output and makes no network calls. It verifies title derivation, tab ownership, lifecycle handling, spawn-cost contracts, and non-Zellij guards through the Node test suite.
 
 ## License
 

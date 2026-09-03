@@ -55,6 +55,36 @@
       "layer": 2,
       "category": "lifecycle",
       "expected_test": "lifecycle: active tab restores the base name instead of marking done"
+    },
+    {
+      "id": "settle-within-ttl-no-spawns",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: settle within TTL reuses the binding with no panes or git spawns"
+    },
+    {
+      "id": "stale-binding-single-panes-fetch",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: stale binding re-validates with exactly one panes fetch"
+    },
+    {
+      "id": "stale-title-single-refetch",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: stale title cache refetches git exactly once"
+    },
+    {
+      "id": "rename-failure-invalidates-binding",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: failed rename invalidates the binding so the next event rebinds"
+    },
+    {
+      "id": "done-tab-poll-backoff",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: unviewed done tab polls with backoff, not a fixed flood"
     }
   ]
 }
