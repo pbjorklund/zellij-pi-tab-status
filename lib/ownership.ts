@@ -1,0 +1,186 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { runCommand, type ExecFileAsyncFn } from "./commands.ts";
+
+export type ZellijTabInfo = {
+  tabId: string;
+  name: string;
+  active: boolean;
+};
+
+export type OwningTabInfo = ZellijTabInfo & {
+  paneCwd: string | null;
+};
+
+type JsonRecord = Record<string, unknown>;
+
+type ZellijPaneInfo = {
+  paneId: string;
+  tabId: string;
+  tabName: string;
+  tabPosition: number | null;
+  paneCommand: string | null;
+  terminalCommand: string | null;
+  paneCwd: string | null;
+  title: string | null;
+  focused: boolean;
+  plugin: boolean;
+};
+
+export function parseTabInfo(value: unknown): ZellijTabInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  const record = value as JsonRecord;
+  const tabId = record.tab_id;
+  const name = record.name;
+
+  if ((typeof tabId !== "string" && typeof tabId !== "number") || typeof name !== "string") {
+    return null;
+  }
+
+  return {
+    tabId: String(tabId),
+    name,
+    active: record.active === true,
+  };
+}
+
+export function parseTabList(stdout: string): ZellijTabInfo[] {
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(parseTabInfo).filter((tab): tab is ZellijTabInfo => tab !== null);
+}
+
+export function parsePaneInfo(value: unknown): ZellijPaneInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  const record = value as JsonRecord;
+  const paneId = record.id;
+  const tabId = record.tab_id;
+  const tabName = record.tab_name;
+
+  if (
+    (typeof paneId !== "string" && typeof paneId !== "number") ||
+    (typeof tabId !== "string" && typeof tabId !== "number") ||
+    typeof tabName !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    paneId: String(paneId),
+    tabId: String(tabId),
+    tabName,
+    tabPosition: typeof record.tab_position === "number" ? record.tab_position : null,
+    paneCommand: typeof record.pane_command === "string" ? record.pane_command : null,
+    terminalCommand: typeof record.terminal_command === "string" ? record.terminal_command : null,
+    paneCwd: typeof record.pane_cwd === "string" ? record.pane_cwd : null,
+    title: typeof record.title === "string" ? record.title : null,
+    focused: record.is_focused === true,
+    plugin: record.is_plugin === true,
+  };
+}
+
+export function parsePaneList(stdout: string): ZellijPaneInfo[] {
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(parsePaneInfo).filter((pane): pane is ZellijPaneInfo => pane !== null);
+}
+
+export function normalizePath(value: string | null): string | null {
+  if (!value) return null;
+  return value.replace(/\/+$/, "") || "/";
+}
+
+export function pathsMatch(left: string | null, right: string): boolean {
+  return normalizePath(left) === normalizePath(right);
+}
+
+function looksLikePiPane(pane: ZellijPaneInfo): boolean {
+  const paneCommand = pane.paneCommand ?? "";
+  const terminalCommand = pane.terminalCommand ?? "";
+  const title = pane.title ?? "";
+
+  return (
+    paneCommand === "pi" ||
+    paneCommand.startsWith("pi ") ||
+    /(^|\s|[;&|])pi(\s|$)/.test(terminalCommand) ||
+    title === "pi" ||
+    title.startsWith("π")
+  );
+}
+
+export function selectOwningPane(
+  panes: ZellijPaneInfo[],
+  tabs: ZellijTabInfo[],
+  cwd: string,
+  envPaneId: string | undefined,
+): ZellijPaneInfo | null {
+  const terminalPanes = panes.filter((pane) => !pane.plugin);
+  if (terminalPanes.length === 0) return null;
+
+  const activeTabIds = new Set(tabs.filter((tab) => tab.active).map((tab) => tab.tabId));
+  const cwdMatches = terminalPanes.filter((pane) => pathsMatch(pane.paneCwd, cwd));
+  const envPane = envPaneId ? terminalPanes.find((pane) => pane.paneId === envPaneId) : undefined;
+
+  // The pane id exported to the PI process is the strongest owner signal, but
+  // only trust it when Zellij also reports this process cwd. Zellij pane ids can
+  // collide with plugin ids, and old shells can leave stale ZELLIJ_PANE_ID values.
+  if (envPane && pathsMatch(envPane.paneCwd, cwd)) return envPane;
+
+  if (cwdMatches.length === 0) return null;
+
+  return cwdMatches
+    .map((pane) => {
+      const score =
+        (pathsMatch(pane.paneCwd, cwd) ? 100 : 0) +
+        (looksLikePiPane(pane) ? 40 : 0) +
+        (activeTabIds.has(pane.tabId) ? 50 : 0) +
+        (pane.focused ? 10 : 0) +
+        (envPaneId && pane.paneId === envPaneId ? 30 : 0) +
+        (pane.tabPosition ?? 0) / 1000;
+
+      return { pane, score };
+    })
+    .sort((left, right) => right.score - left.score)[0]?.pane ?? null;
+}
+
+export async function readOwningTabWith(
+  execFileAsync: ExecFileAsyncFn,
+  ctx: ExtensionContext,
+): Promise<OwningTabInfo | null> {
+  try {
+    const [{ stdout: panesStdout }, tabsResult] = await Promise.all([
+      runCommand(execFileAsync, "zellij", ["action", "list-panes", "--all", "--json", "--command", "--state"]),
+      runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]).catch(() => ({ stdout: "[]" })),
+    ]);
+
+    const pane = selectOwningPane(
+      parsePaneList(panesStdout),
+      parseTabList(tabsResult.stdout),
+      ctx.cwd,
+      process.env.ZELLIJ_PANE_ID,
+    );
+    if (!pane) return null;
+
+    return {
+      tabId: pane.tabId,
+      name: pane.tabName,
+      active: false,
+      paneCwd: pane.paneCwd,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readTabByIdWith(
+  execFileAsync: ExecFileAsyncFn,
+  tabId: string,
+): Promise<ZellijTabInfo | null> {
+  try {
+    const { stdout } = await runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]);
+    return parseTabList(stdout).find((tab) => tab.tabId === tabId) ?? null;
+  } catch {
+    return null;
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "privacy": "public",
   "cases": [
     {
@@ -85,6 +85,48 @@
       "layer": 2,
       "category": "performance",
       "expected_test": "perf: unviewed done tab polls with backoff, not a fixed flood"
+    },
+    {
+      "id": "nonblocking-lifecycle",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: lifecycle hooks do not wait for stalled Zellij"
+    },
+    {
+      "id": "subagent-burst-no-spawns",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: sequential subagent events preserve the spinner deadline"
+    },
+    {
+      "id": "slow-spinner-no-catchup",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: slow spinner writes leave a full interval before the next frame"
+    },
+    {
+      "id": "stale-poll-preserves-work",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "scheduling: a stale seen poll cannot erase new work"
+    },
+    {
+      "id": "shutdown-orders-restore",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "scheduling: shutdown restores base after an in-flight spinner write"
+    },
+    {
+      "id": "literal-bounded-commands",
+      "layer": 2,
+      "category": "guard",
+      "expected_test": "commands: titles remain literal argv with bounded execution"
+    },
+    {
+      "id": "real-git-title-variants",
+      "layer": 2,
+      "category": "title",
+      "expected_test": "titles: real Git unborn branch, detached HEAD, and linked worktree"
     }
   ]
 }

@@ -400,6 +400,7 @@ test("lifecycle: active tab restores the base name instead of marking done", asy
 });
 
 test("lifecycle: working marker animates while work stays active", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const oldZellij = process.env.ZELLIJ;
   process.env.ZELLIJ = "0";
   try {
@@ -410,8 +411,10 @@ test("lifecycle: working marker animates while work stays active", async (t) => 
     await fire("agent_start");
     const before = renames.at(-1);
 
-    // The spinner timer writes new frames while the parent agent is active.
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    for (let i = 0; i < 3; i++) {
+      t.mock.timers.tick(5);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const frames = renames.filter((name) => name !== before);
     assert.ok(frames.length >= 2, `expected spinner frames, got: ${JSON.stringify(renames)}`);
 
@@ -487,6 +490,7 @@ test("perf: stale title cache refetches git exactly once", async (t) => {
 });
 
 test("perf: failed rename invalidates the binding so the next event rebinds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const oldZellij = process.env.ZELLIJ;
   process.env.ZELLIJ = "0";
   try {
@@ -495,6 +499,8 @@ test("perf: failed rename invalidates the binding so the next event rebinds", as
 
     await fire("session_start");
     await fire("agent_start");
+    t.mock.timers.tick(100);
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(spawnCount.renameFailures, 2, "both rename attempts failed");
 
     await fire("agent_settled");
@@ -508,6 +514,7 @@ test("perf: failed rename invalidates the binding so the next event rebinds", as
 });
 
 test("perf: unviewed done tab polls with backoff, not a fixed flood", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const oldZellij = process.env.ZELLIJ;
   process.env.ZELLIJ = "0";
   try {
@@ -522,12 +529,13 @@ test("perf: unviewed done tab polls with backoff, not a fixed flood", async (t) 
     await fire("agent_settled");
     const afterSettled = spawnCount.tabs;
 
-    // A fixed 5ms interval would fire ~20 polls in 100ms; backoff
-    // (5,10,20,40,80) fires 5.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const polls = spawnCount.tabs - afterSettled;
-    assert.ok(polls >= 4, `expected the poller to run, saw ${polls}`);
-    assert.ok(polls <= 8, `expected backoff, saw ${polls} polls in 100ms`);
+    for (const delay of [5, 10, 20, 40]) {
+      t.mock.timers.tick(delay);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    t.mock.timers.tick(25);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(spawnCount.tabs - afterSettled, 4);
   } finally {
     restoreZellijEnv(oldZellij);
   }

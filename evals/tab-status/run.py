@@ -15,7 +15,7 @@ def main() -> int:
     cases = json.loads(cases_path.read_text(encoding="utf-8"))["cases"]
 
     result = subprocess.run(
-        ["node", "--test", "test/pi-extension.test.mjs"],
+        ["node", "--test", *sorted(str(path.relative_to(repo)) for path in (repo / "test").glob("*.mjs"))],
         cwd=repo,
         text=True,
         stdout=subprocess.PIPE,

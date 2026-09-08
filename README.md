@@ -24,7 +24,9 @@ Then run `pi update` or restart PI and approve package installation when prompte
 - Finds the owning tab from `ZELLIJ_PANE_ID`, pane working directory, and Zellij application state.
 - Uses `repository/path:branch` for Git worktrees and the directory name elsewhere.
 - Keeps the working spinner running while the parent agent or tracked subagents are working.
-- Caches the tab binding and Git title, so routine marker updates spawn no extra processes.
+- Caches the tab binding and Git title, so spinner frames need only the rename command.
+- Runs status updates in the background without blocking lifecycle hooks. Repeated subagent starts do not add commands or reset the spinner while the caches are fresh.
+- Waits 500 ms after each spinner update before scheduling the next, so slow commands cannot build a backlog.
 - Polls unviewed done tabs with exponential backoff to stay responsive without spawning constantly.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
 - Clears the marker during compaction, then restores the correct state after success or failure.
@@ -43,7 +45,9 @@ npm test
 npm run eval
 ```
 
-The eval wrapper records no model output and makes no network calls. It verifies title derivation, tab ownership, lifecycle handling, spawn-cost contracts, and non-Zellij guards through the Node test suite.
+The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Mock timers and stalled-command fixtures check polling backoff, event bursts, and shutdown races without wall-clock sleeps.
+
+`pi-extension.ts` registers lifecycle handlers. `lib/controller.ts` owns background scheduling, cached bindings, and teardown. The other `lib/` modules handle commands, ownership, title derivation, and work tracking.
 
 ## License
 
