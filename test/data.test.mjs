@@ -30,6 +30,13 @@ test("ownership: PI command signals break ties within a matching tab", () => {
   assert.equal(status.selectOwningPane([pane({ plugin: true })], [], "/repo", "1"), null);
 });
 
+test("ownership: equal scores preserve input order and a matching exported id wins", () => {
+  const first = pane();
+  const second = pane({ paneId: "2" });
+  assert.equal(status.selectOwningPane([first, second], [], "/repo", undefined), first);
+  assert.equal(status.selectOwningPane([first, second], [], "/repo", "2"), second);
+});
+
 test("parsers: non-array lists and malformed rows cannot become tab bindings", () => {
   for (const value of [null, 1, "pane", [], {}, { tab_id: 1 }, { id: {}, tab_id: 1, tab_name: "repo" }]) {
     assert.equal(status.parsePaneInfo(value), null);

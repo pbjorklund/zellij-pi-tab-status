@@ -49,7 +49,7 @@ npm run eval
 
 The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Mock timers and stalled-command fixtures check polling backoff, event bursts, and shutdown races without wall-clock sleeps.
 
-`pi-extension.ts` registers lifecycle handlers. `lib/controller.ts` owns background scheduling, cached bindings, and teardown. The other `lib/` modules handle commands, ownership, title derivation, and work tracking.
+`pi-extension.ts` registers lifecycle handlers. `lib/controller.ts` schedules writes and teardown. `lib/tab-binding.ts` owns binding retries and the title cache. `lib/subagent-jobs.ts` adapts the job API without coupling its payload format to the scheduler. The other `lib/` modules handle commands, ownership, title derivation, and work tracking.
 
 ## License
 

@@ -127,21 +127,20 @@ export function selectOwningPane(
   // collide with plugin ids, and old shells can leave stale ZELLIJ_PANE_ID values.
   if (envPane && pathsMatch(envPane.paneCwd, cwd)) return envPane;
 
-  if (cwdMatches.length === 0) return null;
-
-  return cwdMatches
-    .map((pane) => {
-      const score =
-        (pathsMatch(pane.paneCwd, cwd) ? 100 : 0) +
-        (looksLikePiPane(pane) ? 40 : 0) +
-        (activeTabIds.has(pane.tabId) ? 50 : 0) +
-        (pane.focused ? 10 : 0) +
-        (envPaneId && pane.paneId === envPaneId ? 30 : 0) +
-        (pane.tabPosition ?? 0) / 1000;
-
-      return { pane, score };
-    })
-    .sort((left, right) => right.score - left.score)[0]?.pane ?? null;
+  let selected: ZellijPaneInfo | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const pane of cwdMatches) {
+    const score =
+      (looksLikePiPane(pane) ? 40 : 0) +
+      (activeTabIds.has(pane.tabId) ? 50 : 0) +
+      (pane.focused ? 10 : 0) +
+      (pane.tabPosition ?? 0) / 1000;
+    if (score > bestScore) {
+      selected = pane;
+      bestScore = score;
+    }
+  }
+  return selected;
 }
 
 export async function readOwningTabWith(

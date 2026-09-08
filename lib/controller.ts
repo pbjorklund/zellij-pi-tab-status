@@ -1,13 +1,9 @@
-import { homedir } from "node:os";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { defaultExecFileAsync, runCommand, type ExecFileAsyncFn } from "./commands.ts";
-import { pathsMatch, readOwningTabWith, readTabByIdWith } from "./ownership.ts";
-import { deriveTabTitle } from "./tab-title.ts";
+import { readTabByIdWith } from "./ownership.ts";
+import { createTabBinding, type TabBinding } from "./tab-binding.ts";
 import { formatCompactingTabName, formatDoneTabName, formatWorkingTabName, isInteractiveZellij } from "./status-model.ts";
 
-const VALIDATION_TTL_MS = 5_000;
-const TITLE_CACHE_TTL_MS = 30_000;
-const BIND_RETRY_ATTEMPTS = 20;
 const RETRY_DELAY_MS = 100;
 const SEEN_POLL_MAX_DELAY_MS = 2_000;
 
@@ -20,13 +16,6 @@ export type ZellijTabStatusOptions = {
 
 export type TabMode = "base" | "working" | "compacting" | "done";
 type Target = { ctx: ExtensionContext; mode: TabMode };
-type Binding = {
-  tabId: string;
-  cwd: string;
-  baseName: string;
-  lastWrittenName: string | null;
-  validatedAt: number;
-};
 type Update = "event" | "frame" | "poll";
 
 export function createTabStatusController(options: ZellijTabStatusOptions = {}) {
@@ -35,8 +24,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const spinnerIntervalMs = options.spinnerIntervalMs ?? 500;
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
   let target: Target | null = null;
-  let binding: Binding | null = null;
-  let titleCache: { cwd: string; title: string; at: number } | null = null;
+  const bindings = createTabBinding(exec, now, retryDelay);
   let worker: Promise<void> | null = null;
   let pending: Update | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -65,46 +53,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     });
   }
 
-  async function title(cwd: string) {
-    if (titleCache?.cwd === cwd && now() - titleCache.at < TITLE_CACHE_TTL_MS) return titleCache.title;
-    const value = await deriveTabTitle(cwd, homedir(), exec);
-    titleCache = { cwd, title: value, at: now() };
-    return value;
-  }
-
-  async function ensureBinding(snapshot: Target) {
-    const ctx = snapshot.ctx;
-    if (binding && pathsMatch(binding.cwd, ctx.cwd) && now() - binding.validatedAt < VALIDATION_TTL_MS) return true;
-
-    for (let attempt = 0; attempt < BIND_RETRY_ATTEMPTS && current(snapshot); attempt++) {
-      const owner = await readOwningTabWith(exec, ctx);
-      if (!current(snapshot)) return false;
-      if (owner) {
-        if (binding?.tabId === owner.tabId && pathsMatch(owner.paneCwd, binding.cwd)) {
-          binding.validatedAt = now();
-          return true;
-        }
-        const cwd = owner.paneCwd ?? ctx.cwd;
-        const baseName = await title(cwd);
-        if (!current(snapshot)) return false;
-        binding = { tabId: owner.tabId, cwd, baseName, lastWrittenName: owner.name, validatedAt: now() };
-        return true;
-      }
-      if (binding && pathsMatch(binding.cwd, ctx.cwd)) {
-        const tab = await readTabByIdWith(exec, binding.tabId);
-        if (!current(snapshot)) return false;
-        if (tab) {
-          binding.validatedAt = now();
-          return true;
-        }
-      }
-      binding = null;
-      if (attempt < BIND_RETRY_ATTEMPTS - 1) await retryDelay();
-    }
-    return false;
-  }
-
-  async function rename(bound: Binding, name: string, valid: () => boolean) {
+  async function rename(bound: TabBinding, name: string, valid: () => boolean) {
     if (bound.lastWrittenName === name) return;
     for (let attempt = 0; attempt < 2 && valid(); attempt++) {
       try {
@@ -123,13 +72,14 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   async function render(snapshot: Target, update: Update) {
     if (update === "event") {
-      if (!(await ensureBinding(snapshot)) || !current(snapshot) || !binding) return;
-      const baseName = await title(binding.cwd);
+      const bound = await bindings.ensure(snapshot.ctx, () => current(snapshot));
+      if (!bound || !current(snapshot)) return;
+      const baseName = await bindings.title(bound.cwd);
       if (!current(snapshot)) return;
-      binding.baseName = baseName;
+      bound.baseName = baseName;
     }
-    if (!binding || !current(snapshot)) return;
-    const bound = binding;
+    const bound = bindings.current();
+    if (!bound || !current(snapshot)) return;
     let name = bound.baseName;
     if (snapshot.mode === "working") {
       name = formatWorkingTabName(bound.baseName, frame++);
@@ -139,7 +89,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       const tab = await readTabByIdWith(exec, bound.tabId);
       if (!current(snapshot)) return;
       if (tab?.active) {
-        const baseName = await title(bound.cwd);
+        const baseName = await bindings.title(bound.cwd);
         if (!current(snapshot)) return;
         bound.baseName = name = baseName;
         target = { ...snapshot, mode: "base" };
@@ -153,7 +103,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   }
 
   function scheduleNext() {
-    if (closing || !binding || !target || timer !== null) return;
+    if (closing || !bindings.current() || !target || timer !== null) return;
     const animated = target.mode === "working" || target.mode === "compacting";
     const update = animated ? "frame" : target.mode === "done" ? "poll" : null;
     if (!update) return;
@@ -189,9 +139,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     setMode(ctx: ExtensionContext, mode: TabMode) {
       if (closing || !isInteractiveZellij(ctx)) return;
       if (target?.mode === mode && target.ctx.cwd === ctx.cwd) {
-        const freshBinding = binding && now() - binding.validatedAt < VALIDATION_TTL_MS;
-        const freshTitle = titleCache && now() - titleCache.at < TITLE_CACHE_TTL_MS;
-        if ((worker && !binding) || (freshBinding && freshTitle && binding?.lastWrittenName != null)) return;
+        if ((worker && !bindings.current()) || bindings.isFresh()) return;
       }
       target = { ctx, mode };
       stopTimer();
@@ -213,9 +161,9 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
         await worker;
         // Do not discover tabs or refresh Git during teardown. Finish any
         // issued write, then restore only the binding this instance owned.
-        if (binding) await rename(binding, binding.baseName, () => true);
-        binding = null;
-        titleCache = null;
+        const bound = bindings.current();
+        if (bound) await rename(bound, bound.baseName, () => true);
+        bindings.clear();
         target = null;
       })();
       return shutdown;
