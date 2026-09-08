@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "privacy": "public",
   "cases": [
     {
@@ -151,6 +151,18 @@
       "layer": 2,
       "category": "performance",
       "expected_test": "scheduling: job polling reads only the new tail and stops on shutdown"
+    },
+    {
+      "id": "completion-survives-compaction",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "activity: legacy completion during session_compact remains unseen"
+    },
+    {
+      "id": "pane-move-removes-owned-overlay",
+      "layer": 2,
+      "category": "ownership",
+      "expected_test": "scheduling: moving a pane restores its old owned overlay"
     }
   ]
 }

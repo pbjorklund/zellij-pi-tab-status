@@ -20,6 +20,7 @@ export function createTabBinding(
   exec: ExecFileAsyncFn,
   now: () => number,
   retryDelay: () => Promise<void>,
+  release: (binding: TabBinding, valid: () => boolean) => Promise<void>,
 ) {
   let binding: TabBinding | null = null;
   let titleCache: { cwd: string; title: string; at: number } | null = null;
@@ -45,6 +46,10 @@ export function createTabBinding(
         const cwd = owner.paneCwd ?? ctx.cwd;
         const baseName = await title(cwd);
         if (!valid()) return null;
+        if (binding && binding.tabId !== owner.tabId) {
+          await release(binding, valid);
+          if (!valid()) return null;
+        }
         binding = { tabId: owner.tabId, cwd, baseName, lastWrittenName: owner.name, validatedAt: now() };
         return binding;
       }

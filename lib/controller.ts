@@ -24,7 +24,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const spinnerIntervalMs = options.spinnerIntervalMs ?? 500;
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
   let target: Target | null = null;
-  const bindings = createTabBinding(exec, now, retryDelay);
+  const bindings = createTabBinding(exec, now, retryDelay, releaseBinding);
   let worker: Promise<void> | null = null;
   let pending: Update | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -68,6 +68,13 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
         if (attempt === 0 && valid()) await retryDelay();
       }
     }
+  }
+
+  async function releaseBinding(bound: TabBinding, valid: () => boolean) {
+    if (bound.lastWrittenName === null || bound.lastWrittenName === bound.baseName) return;
+    const tab = await readTabByIdWith(exec, bound.tabId);
+    // A moved pane no longer owns this tab. Remove only our unchanged overlay.
+    if (valid() && tab?.name === bound.lastWrittenName) await rename(bound, bound.baseName, valid);
   }
 
   async function render(snapshot: Target, update: Update) {

@@ -20,6 +20,26 @@ for (const reason of ["threshold", "overflow", "manual"]) {
   });
 }
 
+for (const terminal of ["session_compact", "session_compact_failed"]) {
+  for (const provider of ["legacy", "current"]) {
+    test(`activity: ${provider} completion during ${terminal} remains unseen`, async (t) => {
+      const h = harness(t);
+      h.fire("session_start");
+      if (provider === "legacy") h.fire("subagents:started", { id: "child" });
+      else h.fire("tool_execution_end", jobResult("child"));
+      h.fire("session_before_compact", { reason: "manual" });
+      await flush();
+      if (provider === "legacy") h.fire("subagents:completed", { id: "child" });
+      else h.appendEntry(completion("child"));
+      await h.tick(500);
+      assert.match(h.writes.at(-1)?.name, /^[◐◓◑◒] repo:main$/);
+      h.fire(terminal);
+      await flush();
+      assert.equal(h.writes.at(-1)?.name, "● repo:main");
+    });
+  }
+}
+
 const jobResult = (jobId, state = "queued", toolName = "subagent_spawn") => ({
   toolName, isError: false, result: { details: { jobId, state } },
 });

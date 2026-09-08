@@ -21,7 +21,7 @@ Then run `pi update` or restart PI and approve package installation when prompte
 ## Behavior
 
 - Runs only in PI's TUI inside Zellij.
-- Finds the owning tab from `ZELLIJ_PANE_ID`, pane working directory, and Zellij application state.
+- Finds the owning tab from `ZELLIJ_PANE_ID`, pane working directory, and Zellij application state. When the pane moves, removes its old overlay only if that tab's title has not been changed by someone else.
 - Uses `repository/path:branch` for Git worktrees and the directory name elsewhere.
 - Keeps the working spinner running while the parent agent or tracked subagents are working.
 - Caches the tab binding and Git title, so spinner frames need only the rename command.
@@ -30,7 +30,7 @@ Then run `pi update` or restart PI and approve package installation when prompte
 - Polls unviewed done tabs with exponential backoff to stay responsive without spawning constantly.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
 - Animates `◐ ◓ ◑ ◒` during manual and automatic compaction, then restores the correct state after success, failure, or cancellation.
-- Marks completed work in inactive tabs with `●` only after PI emits `agent_settled`.
+- Marks inactive tabs with `●` once the parent has settled and all tracked subagents have finished. Preserves completion received during compaction.
 - Restores the base name when the tab is viewed, on user input, or during shutdown.
 - Treats Zellij commands as best effort, so tab-status failures do not interrupt PI.
 

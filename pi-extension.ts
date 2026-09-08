@@ -17,10 +17,12 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
   const work = createWorkTracker();
   let currentCtx: ExtensionContext | null = null;
   let compacting = false;
+  let completionPending = false;
   let closed = false;
 
   function showActivity(ctx: ExtensionContext, idle: "base" | "done" = "base") {
     currentCtx = ctx;
+    if (compacting && idle === "done" && !work.hasActiveWork()) completionPending = true;
     controller.setMode(ctx, compacting ? "compacting" : work.hasActiveWork() ? "working" : idle);
   }
 
@@ -47,11 +49,14 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
   });
   pi.on("session_before_compact", (_event, ctx) => {
     compacting = true;
+    completionPending = false;
     showActivity(ctx);
   });
   function finishCompacting(_event: unknown, ctx: ExtensionContext) {
     compacting = false;
-    showActivity(ctx);
+    const idle = completionPending ? "done" : "base";
+    completionPending = false;
+    showActivity(ctx, idle);
   }
   pi.on("session_compact", finishCompacting);
   pi.on("session_compact_failed", finishCompacting);
@@ -81,6 +86,7 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
     jobs.close();
     work.reset();
     compacting = false;
+    completionPending = false;
     currentCtx = null;
     return controller.close();
   });

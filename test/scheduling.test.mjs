@@ -156,6 +156,38 @@ test("scheduling: interactive input clears done but extension input does not", a
   assert.equal(h.calls.length, count);
 });
 
+test("scheduling: moving a pane restores its old owned overlay", async (t) => {
+  const h = harness(t);
+  await h.start();
+  await h.tick(5_000);
+  h.setTabOutput(JSON.stringify([
+    { tab_id: 26, name: h.writes.at(-1).name, active: false },
+    { tab_id: 27, name: "repo:main", active: false },
+  ]));
+  h.moveTo(27);
+  const before = h.writes.length;
+  h.fire("agent_settled");
+  await flush();
+  assert.deepEqual(h.writes.slice(before), [
+    { tabId: "26", name: "repo:main" },
+    { tabId: "27", name: "● repo:main" },
+  ]);
+});
+
+for (const previous of [[], [{ tab_id: 26, name: "another owner", active: false }]]) {
+  test(`scheduling: rebinding leaves ${previous.length ? "externally renamed" : "missing"} tabs alone`, async (t) => {
+    const h = harness(t);
+    await h.start();
+    await h.tick(5_000);
+    h.setTabOutput(JSON.stringify([...previous, { tab_id: 27, name: "repo:main", active: false }]));
+    h.moveTo(27);
+    const before = h.writes.length;
+    h.fire("agent_settled");
+    await flush();
+    assert.deepEqual(h.writes.slice(before), [{ tabId: "27", name: "● repo:main" }]);
+  });
+}
+
 test("scheduling: expired binding follows a moved pane", async (t) => {
   const h = harness(t);
   await h.start();
