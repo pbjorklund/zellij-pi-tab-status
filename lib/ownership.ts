@@ -1,14 +1,7 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { runCommand, type ExecFileAsyncFn } from "./commands.ts";
-
 export type ZellijTabInfo = {
   tabId: string;
   name: string;
   active: boolean;
-};
-
-export type OwningTabInfo = ZellijTabInfo & {
-  paneCwd: string | null;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -141,45 +134,4 @@ export function selectOwningPane(
     }
   }
   return selected;
-}
-
-export async function readOwningTabWith(
-  execFileAsync: ExecFileAsyncFn,
-  ctx: ExtensionContext,
-): Promise<OwningTabInfo | null> {
-  try {
-    const [{ stdout: panesStdout }, tabsResult] = await Promise.all([
-      runCommand(execFileAsync, "zellij", ["action", "list-panes", "--all", "--json", "--command", "--state"]),
-      runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]).catch(() => ({ stdout: "[]" })),
-    ]);
-
-    const pane = selectOwningPane(
-      parsePaneList(panesStdout),
-      parseTabList(tabsResult.stdout),
-      ctx.cwd,
-      process.env.ZELLIJ_PANE_ID,
-    );
-    if (!pane) return null;
-
-    return {
-      tabId: pane.tabId,
-      name: pane.tabName,
-      active: false,
-      paneCwd: pane.paneCwd,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function readTabByIdWith(
-  execFileAsync: ExecFileAsyncFn,
-  tabId: string,
-): Promise<ZellijTabInfo | null> {
-  try {
-    const { stdout } = await runCommand(execFileAsync, "zellij", ["action", "list-tabs", "--json", "--state"]);
-    return parseTabList(stdout).find((tab) => tab.tabId === tabId) ?? null;
-  } catch {
-    return null;
-  }
 }

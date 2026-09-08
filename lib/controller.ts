@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { defaultExecFileAsync, runCommand, type ExecFileAsyncFn } from "./commands.ts";
-import { readTabByIdWith } from "./ownership.ts";
-import { createTabBinding, type TabBinding } from "./tab-binding.ts";
+import { defaultExecFileAsync, type ExecFileAsyncFn } from "./commands.ts";
+import { createTabWriter, readTabByIdWith } from "./zellij.ts";
+import { createTabBinding } from "./tab-binding.ts";
 import { formatCompactingTabName, formatDoneTabName, formatWorkingTabName, isInteractiveZellij } from "./status-model.ts";
 
 const RETRY_DELAY_MS = 100;
@@ -24,7 +24,8 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const spinnerIntervalMs = options.spinnerIntervalMs ?? 500;
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
   let target: Target | null = null;
-  const bindings = createTabBinding(exec, now, retryDelay, releaseBinding);
+  const writer = createTabWriter(exec, retryDelay);
+  const bindings = createTabBinding(exec, now, retryDelay, writer.release);
   let worker: Promise<void> | null = null;
   let pending: Update | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -51,30 +52,6 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       }
       cancelRetry = finish;
     });
-  }
-
-  async function rename(bound: TabBinding, name: string, valid: () => boolean) {
-    if (bound.lastWrittenName === name) return;
-    for (let attempt = 0; attempt < 2 && valid(); attempt++) {
-      try {
-        await runCommand(exec, "zellij", ["action", "rename-tab-by-id", bound.tabId, name]);
-        // Even an obsolete write reached Zellij. Record it so the next update
-        // cannot skip the corrective write based on an older cached name.
-        bound.lastWrittenName = name;
-        return;
-      } catch {
-        bound.lastWrittenName = null;
-        bound.validatedAt = Number.NEGATIVE_INFINITY;
-        if (attempt === 0 && valid()) await retryDelay();
-      }
-    }
-  }
-
-  async function releaseBinding(bound: TabBinding, valid: () => boolean) {
-    if (bound.lastWrittenName === null || bound.lastWrittenName === bound.baseName) return;
-    const tab = await readTabByIdWith(exec, bound.tabId);
-    // A moved pane no longer owns this tab. Remove only our unchanged overlay.
-    if (valid() && tab?.name === bound.lastWrittenName) await rename(bound, bound.baseName, valid);
   }
 
   async function render(snapshot: Target, update: Update) {
@@ -106,7 +83,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
         if (update === "poll") pollDelayMs = Math.min(pollDelayMs * 2, SEEN_POLL_MAX_DELAY_MS);
       }
     }
-    await rename(bound, name, () => current(snapshot));
+    await writer.rename(bound, name, () => current(snapshot));
   }
 
   function scheduleNext() {
@@ -169,7 +146,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
         // Do not discover tabs or refresh Git during teardown. Finish any
         // issued write, then restore only the binding this instance owned.
         const bound = bindings.current();
-        if (bound) await rename(bound, bound.baseName, () => true);
+        if (bound) await writer.rename(bound, bound.baseName, () => true);
         bindings.clear();
         target = null;
       })();

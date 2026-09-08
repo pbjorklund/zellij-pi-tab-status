@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import * as status from "../pi-extension.ts";
-import { readOwningTabWith, readTabByIdWith } from "../lib/ownership.ts";
+import { readOwningTabWith, readTabByIdWith } from "../lib/zellij.ts";
 import { runCommand } from "../lib/commands.ts";
 
 const pane = (values = {}) => ({

@@ -1,7 +1,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import type { ExecFileAsyncFn } from "./commands.ts";
-import { pathsMatch, readOwningTabWith, readTabByIdWith } from "./ownership.ts";
+import { pathsMatch } from "./ownership.ts";
+import { readOwningTabWith, readTabByIdWith } from "./zellij.ts";
 import { deriveTabTitle } from "./tab-title.ts";
 
 const VALIDATION_TTL_MS = 5_000;

@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createTabStatusController, type ZellijTabStatusOptions } from "./lib/controller.ts";
-import { createWorkTracker, parseSubagentId } from "./lib/status-model.ts";
+import { createWorkTracker, parseSubagentId } from "./lib/work-tracker.ts";
 import { createSubagentJobObserver } from "./lib/subagent-jobs.ts";
 
 export type { ZellijTabStatusOptions } from "./lib/controller.ts";
@@ -9,8 +9,9 @@ export { parseTabInfo, parseTabList, parsePaneInfo, parsePaneList, selectOwningP
 export { truncateWithEllipsis, formatGitTabTitle, deriveTabTitle } from "./lib/tab-title.ts";
 export {
   stripPiTabPrefix, formatWorkingTabName, formatCompactingTabName, formatDoneTabName,
-  isWorkingTabName, isCompactingTabName, parseSubagentId, createWorkTracker, isInteractiveZellij,
+  isWorkingTabName, isCompactingTabName, isInteractiveZellij,
 } from "./lib/status-model.ts";
+export { parseSubagentId, createWorkTracker } from "./lib/work-tracker.ts";
 
 export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabStatusOptions = {}) {
   const controller = createTabStatusController(options);

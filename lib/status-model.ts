@@ -4,10 +4,6 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const COMPACTION_FRAMES = ["◐", "◓", "◑", "◒"] as const;
 const DONE_PREFIX = "●";
 
-export type SubagentLifecycleEvent = {
-  id?: unknown;
-};
-
 export function stripPiTabPrefix(name: string): string {
   const trimmed = name.trimStart();
 
@@ -42,44 +38,6 @@ export function isWorkingTabName(name: string): boolean {
 export function isCompactingTabName(name: string): boolean {
   const trimmed = name.trimStart();
   return COMPACTION_FRAMES.some((frame) => trimmed.startsWith(`${frame} `));
-}
-
-export function parseSubagentId(event: unknown): string | null {
-  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
-  const { id } = event as SubagentLifecycleEvent;
-  return typeof id === "string" && id.trim().length > 0 ? id : null;
-}
-
-export function createWorkTracker() {
-  let parentAgentActive = false;
-  const activeSubagentIds = new Set<string>();
-
-  return {
-    startParentAgent() {
-      parentAgentActive = true;
-    },
-    endParentAgent() {
-      parentAgentActive = false;
-    },
-    startSubagent(event: SubagentLifecycleEvent) {
-      const id = parseSubagentId(event);
-      if (id) activeSubagentIds.add(id);
-    },
-    endSubagent(event: SubagentLifecycleEvent) {
-      const id = parseSubagentId(event);
-      if (id) activeSubagentIds.delete(id);
-    },
-    reset() {
-      parentAgentActive = false;
-      activeSubagentIds.clear();
-    },
-    hasActiveWork() {
-      return parentAgentActive || activeSubagentIds.size > 0;
-    },
-    activeSubagentCount() {
-      return activeSubagentIds.size;
-    },
-  };
 }
 
 export function isInteractiveZellij(ctx: Pick<ExtensionContext, "hasUI" | "mode">): boolean {
