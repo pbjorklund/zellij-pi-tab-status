@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "privacy": "public",
   "cases": [
     {
@@ -163,6 +163,18 @@
       "layer": 2,
       "category": "ownership",
       "expected_test": "scheduling: moving a pane restores its old owned overlay"
+    },
+    {
+      "id": "new-work-overrides-compaction-completion",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "activity state: new work takes precedence over completion during compaction"
+    },
+    {
+      "id": "compaction-does-not-replay-completion",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "activity state: a later compaction does not replay a previous completion"
     }
   ]
 }

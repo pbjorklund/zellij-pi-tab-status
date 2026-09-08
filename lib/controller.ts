@@ -1,4 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { TabMode } from "./activity.ts";
+export type { TabMode } from "./activity.ts";
 import { defaultExecFileAsync, type ExecFileAsyncFn } from "./commands.ts";
 import { createTabWriter, readTabByIdWith } from "./zellij.ts";
 import { createTabBinding } from "./tab-binding.ts";
@@ -14,7 +16,6 @@ export type ZellijTabStatusOptions = {
   now?: () => number;
 };
 
-export type TabMode = "base" | "working" | "compacting" | "done";
 type Target = { ctx: ExtensionContext; mode: TabMode };
 type Update = "event" | "frame" | "poll";
 

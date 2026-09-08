@@ -54,7 +54,7 @@ The eval wrapper runs every test file, records no model output, and makes no net
 - `controller.ts` coalesces updates, schedules animation and polling, and orders teardown.
 - `tab-binding.ts` owns binding retries and the title cache.
 - `ownership.ts` parses pane/tab data and selects the owner without running commands. `zellij.ts` reads Zellij state and handles rename retries and overlay cleanup.
-- `work-tracker.ts` tracks parent and child work. `subagent-jobs.ts` adapts the job API and reads idle completions.
+- `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts the job API and reads idle completions.
 - `status-model.ts` formats markers; `tab-title.ts` derives Git/directory titles; `commands.ts` bounds command execution.
 
 All modules live in `lib/`. Public exports remain in `pi-extension.ts`.
