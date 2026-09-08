@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.mjs",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=95 --test-coverage-functions=95 --test-coverage-include='lib/*.ts' --test-coverage-include=pi-extension.ts test/*.mjs",
     "eval": "python evals/tab-status/run.py"
   },
   "peerDependencies": {

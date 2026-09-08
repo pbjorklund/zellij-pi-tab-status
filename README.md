@@ -44,8 +44,11 @@ Run the deterministic regression suite:
 
 ```bash
 npm test
+npm run test:coverage
 npm run eval
 ```
+
+CI enforces at least 95% aggregate line, branch, and function coverage across `pi-extension.ts` and `lib/*.ts`. This measures the unit and integration tests together, not live E2E coverage. Test fixtures are not production source.
 
 The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Lifecycle tests share their setup, mock timers, and stalled-command fixtures to check polling backoff, event bursts, and shutdown races without wall-clock sleeps. Public-API and Git-title tests run in separate files.
 

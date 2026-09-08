@@ -52,6 +52,25 @@ test("titles: home and unresolved HEAD fallbacks", async () => {
   assert.equal(await status.deriveTabTitle("/repo", "/home/test", unresolved), "repo:HEAD");
 });
 
+for (const detached of [false, true]) {
+  test(`titles: blank ${detached ? "detached revision" : "symbolic branch"} output keeps HEAD`, async () => {
+    const exec = async (_command, args) => {
+      if (args[1] === "--show-toplevel") return { stdout: "/repo\n" };
+      if (args[1] === "--show-prefix") return { stdout: "\n" };
+      if (detached && args[0] === "symbolic-ref") throw new Error("detached HEAD");
+      return { stdout: " \n" };
+    };
+    assert.equal(await status.deriveTabTitle("/repo", "/home/test", exec), "repo:HEAD");
+  });
+}
+
+test("titles: an unnamed directory falls back to a nonempty title", async () => {
+  const failed = async () => { throw new Error("not a repo"); };
+  for (const directory of ["/", ""]) {
+    assert.equal(await status.deriveTabTitle(directory, "/home/test", failed), "~");
+  }
+});
+
 test("titles: real Git unborn branch, detached HEAD, and linked worktree", async () => {
   const root = mkdtempSync(join(tmpdir(), "zpts-data-"));
   const repo = join(root, "repo");

@@ -19,6 +19,27 @@ test("scheduling: lifecycle hooks do not wait for stalled Zellij", async (t) => 
   assert.equal(h.writes.at(-1)?.name, "● repo:main");
 });
 
+test("scheduling: an unexpected clock adapter failure does not stop later activity", async (t) => {
+  let clockFailed = false;
+  const h = harness(t, { now: () => {
+    if (clockFailed) throw new Error("clock unavailable");
+    return Date.now();
+  } });
+  await h.start();
+  const before = h.writes.length;
+  clockFailed = true;
+  assert.equal(h.fire("agent_settled"), undefined);
+  await flush();
+  assert.equal(h.writes.length, before, "a failed update must not issue a stale write");
+
+  clockFailed = false;
+  await h.emit("agent_start");
+  await h.tick(500);
+  assert.equal(h.writes.at(-1)?.name, "⠙ repo:main");
+  await h.emit("agent_settled");
+  assert.equal(h.writes.at(-1)?.name, "● repo:main");
+});
+
 test("scheduling: 100 subagent starts add no commands while already working", async (t) => {
   const h = harness(t);
   await h.start();

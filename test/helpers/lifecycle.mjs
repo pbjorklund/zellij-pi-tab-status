@@ -44,6 +44,7 @@ export function harness(t, options = {}) {
   }, {
     spinnerIntervalMs: options.spinnerIntervalMs,
     seenPollFirstDelayMs: options.seenPollFirstDelayMs,
+    now: options.now,
     execFileAsync: async (command, args, execOptions) => {
       calls.push({ command, args, options: execOptions, at: Date.now() });
       if (gate?.matches(command, args)) {
