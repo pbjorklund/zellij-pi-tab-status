@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "privacy": "public",
   "cases": [
     {
@@ -127,6 +127,30 @@
       "layer": 2,
       "category": "title",
       "expected_test": "titles: real Git unborn branch, detached HEAD, and linked worktree"
+    },
+    {
+      "id": "compaction-animates-without-parent",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "scheduling: threshold compaction animates without parent work"
+    },
+    {
+      "id": "job-api-child-only-activity",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "scheduling: current subagent jobs animate after parent settlement and finish while idle"
+    },
+    {
+      "id": "legacy-and-current-subagents",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "scheduling: legacy and current subagents can keep the same parent idle"
+    },
+    {
+      "id": "job-tail-polling-budget",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: job polling reads only the new tail and stops on shutdown"
     }
   ]
 }

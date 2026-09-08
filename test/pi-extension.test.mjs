@@ -277,7 +277,7 @@ test("lifecycle: mid-run threshold compaction keeps the working marker", async (
     // PI 0.84.4 can compact between tool calls in the same run: no agent_end,
     // no retry. The run is still active, so the done marker must not appear.
     await fire("session_before_compact", { reason: "threshold", willRetry: false });
-    assert.equal(renames.at(-1), "repo:main");
+    assert.equal(renames.at(-1), "◐ repo:main");
 
     await fire("session_compact", { reason: "threshold", willRetry: false });
     assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);
@@ -366,7 +366,7 @@ test("lifecycle: overflow compaction retry keeps work marked until settled", asy
     assert.equal(hasHandler("agent_end"), false);
     await publish("agent_end", { messages: [], willRetry: true });
     await fire("session_before_compact", { reason: "overflow", willRetry: true });
-    assert.equal(renames.at(-1), "repo:main");
+    assert.equal(renames.at(-1), "◐ repo:main");
 
     await fire("session_compact", { reason: "overflow", willRetry: true });
     assert.match(renames.at(-1), /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/);

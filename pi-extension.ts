@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createTabStatusController, type ZellijTabStatusOptions } from "./lib/controller.ts";
-import { createWorkTracker, parseSubagentId, type SubagentLifecycleEvent } from "./lib/status-model.ts";
+import { createWorkTracker, parseSubagentId } from "./lib/status-model.ts";
+import { createSubagentJobObserver } from "./lib/subagent-jobs.ts";
 
 export type { ZellijTabStatusOptions } from "./lib/controller.ts";
 export type { ZellijTabInfo } from "./lib/ownership.ts";
@@ -23,7 +24,17 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
     controller.setMode(ctx, compacting ? "compacting" : work.hasActiveWork() ? "working" : idle);
   }
 
-  pi.on("session_start", (_event, ctx) => showActivity(ctx));
+  const jobs = createSubagentJobObserver((id, active, ctx) => {
+    if (active) work.startSubagent({ id });
+    else work.endSubagent({ id });
+    showActivity(ctx, "done");
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    jobs.start(ctx);
+    showActivity(ctx);
+  });
+  pi.on("tool_execution_end", (event, ctx) => jobs.toolEnd(event, ctx));
   pi.on("agent_start", (_event, ctx) => {
     work.startParentAgent();
     showActivity(ctx);
@@ -38,23 +49,25 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
     compacting = true;
     showActivity(ctx);
   });
-  for (const event of ["session_compact", "session_compact_failed"] as const) {
-    pi.on(event, (_event, ctx) => {
-      compacting = false;
-      showActivity(ctx);
-    });
+  function finishCompacting(_event: unknown, ctx: ExtensionContext) {
+    compacting = false;
+    showActivity(ctx);
   }
+  pi.on("session_compact", finishCompacting);
+  pi.on("session_compact_failed", finishCompacting);
 
-  pi.events?.on?.("subagents:started", (event: SubagentLifecycleEvent) => {
-    if (closed || !parseSubagentId(event)) return;
-    work.startSubagent(event);
+  pi.events?.on?.("subagents:started", (event) => {
+    const id = parseSubagentId(event);
+    if (closed || !id) return;
+    work.startSubagent({ id });
     if (currentCtx) showActivity(currentCtx);
   });
   for (const event of ["subagents:completed", "subagents:failed"]) {
-    pi.events?.on?.(event, (data: SubagentLifecycleEvent) => {
-      if (closed || !parseSubagentId(data)) return;
+    pi.events?.on?.(event, (data) => {
+      const id = parseSubagentId(data);
+      if (closed || !id) return;
       const wasWorking = work.hasActiveWork();
-      work.endSubagent(data);
+      work.endSubagent({ id });
       if (currentCtx && wasWorking) showActivity(currentCtx, "done");
     });
   }
@@ -65,6 +78,7 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
   });
   pi.on("session_shutdown", () => {
     closed = true;
+    jobs.close();
     work.reset();
     compacting = false;
     currentCtx = null;

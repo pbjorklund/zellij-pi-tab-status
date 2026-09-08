@@ -44,8 +44,10 @@ export function isCompactingTabName(name: string): boolean {
   return COMPACTION_FRAMES.some((frame) => trimmed.startsWith(`${frame} `));
 }
 
-export function parseSubagentId(event: SubagentLifecycleEvent): string | null {
-  return typeof event.id === "string" && event.id.trim().length > 0 ? event.id : null;
+export function parseSubagentId(event: unknown): string | null {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
+  const { id } = event as SubagentLifecycleEvent;
+  return typeof id === "string" && id.trim().length > 0 ? id : null;
 }
 
 export function createWorkTracker() {

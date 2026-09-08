@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { defaultExecFileAsync, runCommand, type ExecFileAsyncFn } from "./commands.ts";
 import { pathsMatch, readOwningTabWith, readTabByIdWith } from "./ownership.ts";
 import { deriveTabTitle } from "./tab-title.ts";
-import { formatDoneTabName, formatWorkingTabName, isInteractiveZellij } from "./status-model.ts";
+import { formatCompactingTabName, formatDoneTabName, formatWorkingTabName, isInteractiveZellij } from "./status-model.ts";
 
 const VALIDATION_TTL_MS = 5_000;
 const TITLE_CACHE_TTL_MS = 30_000;
@@ -133,6 +133,8 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     let name = bound.baseName;
     if (snapshot.mode === "working") {
       name = formatWorkingTabName(bound.baseName, frame++);
+    } else if (snapshot.mode === "compacting") {
+      name = formatCompactingTabName(bound.baseName, frame++);
     } else if (snapshot.mode === "done") {
       const tab = await readTabByIdWith(exec, bound.tabId);
       if (!current(snapshot)) return;
@@ -152,7 +154,8 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   function scheduleNext() {
     if (closing || !binding || !target || timer !== null) return;
-    const update = target.mode === "working" ? "frame" : target.mode === "done" ? "poll" : null;
+    const animated = target.mode === "working" || target.mode === "compacting";
+    const update = animated ? "frame" : target.mode === "done" ? "poll" : null;
     if (!update) return;
     timer = setTimeout(() => {
       timer = null;

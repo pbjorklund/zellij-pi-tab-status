@@ -29,10 +29,12 @@ Then run `pi update` or restart PI and approve package installation when prompte
 - Waits 500 ms after each spinner update before scheduling the next, so slow commands cannot build a backlog.
 - Polls unviewed done tabs with exponential backoff to stay responsive without spawning constantly.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
-- Clears the marker during compaction, then restores the correct state after success or failure.
+- Animates `◐ ◓ ◑ ◒` during manual and automatic compaction, then restores the correct state after success, failure, or cancellation.
 - Marks completed work in inactive tabs with `●` only after PI emits `agent_settled`.
 - Restores the base name when the tab is viewed, on user input, or during shutdown.
 - Treats Zellij commands as best effort, so tab-status failures do not interrupt PI.
+
+Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` job API (`subagent_spawn`, `subagent_wait`, `subagent_cancel`, and `subagent_inspect` results). For the job API, it reads new `pi-subagents-completion` entries from in-memory session history every 500 ms while jobs are active. This also catches completions while the main agent is idle, without spawning processes or reading session files.
 
 The extension needs PI 0.84.3 or newer and a Zellij version that provides `list-panes`, `list-tabs`, and `rename-tab-by-id` actions.
 
