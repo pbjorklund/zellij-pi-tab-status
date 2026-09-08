@@ -47,7 +47,7 @@ npm test
 npm run eval
 ```
 
-The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Mock timers and stalled-command fixtures check polling backoff, event bursts, and shutdown races without wall-clock sleeps.
+The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Lifecycle tests share their setup, mock timers, and stalled-command fixtures to check polling backoff, event bursts, and shutdown races without wall-clock sleeps. Public-API and Git-title tests run in separate files.
 
 `pi-extension.ts` registers lifecycle handlers. The modules separate state, scheduling, and command execution:
 

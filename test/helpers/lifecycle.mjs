@@ -42,6 +42,8 @@ export function harness(t, options = {}) {
     on: (name, handler) => handlers.set(name, handler),
     events: { on: (name, handler) => handlers.set(name, handler) },
   }, {
+    spinnerIntervalMs: options.spinnerIntervalMs,
+    seenPollFirstDelayMs: options.seenPollFirstDelayMs,
     execFileAsync: async (command, args, execOptions) => {
       calls.push({ command, args, options: execOptions, at: Date.now() });
       if (gate?.matches(command, args)) {
@@ -51,10 +53,15 @@ export function harness(t, options = {}) {
         await current.release.promise;
       }
       if (command === "git") {
-        if (args[1] === "--show-toplevel") return { stdout: "/repo" };
-        if (args[1] === "--show-prefix") return { stdout: "" };
+        if (args[0] === "rev-parse") {
+          if (args[1] === "--show-toplevel") return { stdout: "/repo" };
+          if (args[1] === "--show-prefix") return { stdout: "" };
+          if (args[1] === "--short") return { stdout: branch };
+        }
+        assert.equal(args[0], "symbolic-ref");
         return { stdout: branch };
       }
+      assert.equal(command, "zellij");
       if (args[1] === "list-panes") return { stdout: paneOutput ?? JSON.stringify([
         { id: 248, tab_id: tabId, tab_name: "repo:main", pane_cwd: "/repo", pane_command: "pi" },
       ]) };
@@ -70,13 +77,19 @@ export function harness(t, options = {}) {
       return { stdout: "" };
     },
   });
-  const fire = (name, event = {}) => handlers.get(name)?.(event, ctx);
+  const fire = (name, event = {}) => {
+    const handler = handlers.get(name);
+    assert.ok(handler, `missing handler for ${name}`);
+    return handler(event, ctx);
+  };
   t.after(async () => {
     for (const held of heldCommands) held.release.resolve();
     await fire("session_shutdown");
   });
   return {
     fire, calls, writes,
+    hasHandler: (name) => handlers.has(name),
+    async emit(name, event) { await fire(name, event); await flush(); },
     entryReads: () => entryReads,
     appendEntry(entry) {
       const id = `entry-${entries.size}`;
