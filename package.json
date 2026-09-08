@@ -14,6 +14,8 @@
   "scripts": {
     "test": "node --test test/*.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=95 --test-coverage-branches=95 --test-coverage-functions=95 --test-coverage-include='lib/*.ts' --test-coverage-include=pi-extension.ts test/*.mjs",
+    "test:smoke": "python e2e/run.py LiveTabStatus.test_parent_completion_seen_and_shutdown",
+    "test:e2e": "python -m unittest discover -s e2e -p 'test_*.py' && python e2e/run.py",
     "eval": "python evals/tab-status/run.py"
   },
   "peerDependencies": {

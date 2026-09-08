@@ -52,6 +52,25 @@ CI enforces at least 95% aggregate line, branch, and function coverage across `p
 
 The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Lifecycle tests share their setup, mock timers, and stalled-command fixtures to check polling backoff, event bursts, and shutdown races without wall-clock sleeps. Public-API and Git-title tests run in separate files.
 
+### Live smoke and E2E tests
+
+On Linux, install PI, Zellij, Node.js 24+, Python 3, Git, and util-linux's `script` command, then run:
+
+```bash
+npm run test:smoke
+npm run test:e2e
+```
+
+CI runs both commands with PI 0.85.1 and Zellij 0.45.0. Missing executables fail the tests; they are not skipped.
+
+Each test starts a real PI TUI in a separate Zellij session with a temporary Git repository, HOME, and config. The runner passes no inherited credentials or user settings, addresses only its own session, and cleans up after success or failure. No model API calls are made.
+
+The smoke test checks advancing work frames, completion in a background tab, clearing on view, and title restoration when PI exits. The full suite also checks a modern child job that outlives its parent, legacy child completion during compaction, and cancelled compaction. Every title check also verifies that the control tab is unchanged.
+
+PI dispatches the real tool, lifecycle, compaction, and session-history events; Zellij performs the actual tab writes. `e2e/fixture.ts` supplies local model responses, child-protocol payloads, and compaction results/cancellation. These tests do not run an external model or the installed subagent package. The Python runner has separate cleanup regression tests.
+
+### Structure
+
 `pi-extension.ts` registers lifecycle handlers. The modules separate state, scheduling, and command execution:
 
 - `controller.ts` coalesces updates, schedules animation and polling, and orders teardown.

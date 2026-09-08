@@ -22,3 +22,28 @@ jobs:
           python-version: "3.13"
       - run: npm run test:coverage
       - run: npm run eval
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install PI and Zellij
+        run: |
+          npm install --global @earendil-works/pi-coding-agent@0.85.1
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/zellij.tar.gz" \
+            https://github.com/zellij-org/zellij/releases/download/v0.45.0/zellij-x86_64-unknown-linux-musl.tar.gz
+          echo "ab8b2494d80c20c07da4361041a25b96b93c73df992d2d54143e70fb9b1a1063  $RUNNER_TEMP/zellij.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/zellij-bin"
+          tar -xzf "$RUNNER_TEMP/zellij.tar.gz" -C "$RUNNER_TEMP/zellij-bin" zellij
+          echo "$RUNNER_TEMP/zellij-bin" >> "$GITHUB_PATH"
+      - run: pi --version && zellij --version
+      - run: npm run test:smoke
+      - run: npm run test:e2e
