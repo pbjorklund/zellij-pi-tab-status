@@ -116,6 +116,15 @@ test("scheduling: current job tracking ignores errors, unrelated tools, and wait
   assert.equal(h.writes.at(-1)?.name, "● repo:main");
 });
 
+test("activity: unknown legacy completion during compaction stays idle", async (t) => {
+  const h = harness(t);
+  await h.emit("session_start");
+  await h.emit("session_before_compact");
+  await h.emit("subagents:completed", { id: "unknown" });
+  await h.emit("session_compact");
+  assert.equal(h.writes.at(-1)?.name, "repo:main");
+});
+
 test("scheduling: malformed legacy events cannot interrupt status handling", async (t) => {
   const h = harness(t);
   h.fire("session_start");

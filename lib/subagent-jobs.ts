@@ -10,6 +10,16 @@ function record(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null;
 }
 
+type JobUpdate = { id: string; active: boolean };
+
+export function parseJobUpdate(value: unknown): JobUpdate | null {
+  const job = record(value);
+  if (typeof job?.jobId !== "string" || !job.jobId.trim()) return null;
+  if (job.state === "queued" || job.state === "running") return { id: job.jobId, active: true };
+  if (typeof job.state === "string" && TERMINAL_STATES.has(job.state)) return { id: job.jobId, active: false };
+  return null;
+}
+
 export function createSubagentJobObserver(
   onChange: (id: string, active: boolean, ctx: ExtensionContext) => void,
 ) {
@@ -26,14 +36,13 @@ export function createSubagentJobObserver(
     timer = null;
   }
 
-  function observe(value: unknown) {
-    const job = record(value);
-    if (!ctx || typeof job?.jobId !== "string" || !job.jobId.trim()) return;
-    const id = job.jobId;
-    if (typeof job.state === "string" && TERMINAL_STATES.has(job.state)) {
+  function observe(job: JobUpdate | null) {
+    if (!ctx || !job) return;
+    const { id } = job;
+    if (!job.active) {
       finished.add(id);
       if (active.delete(id)) onChange(id, false, ctx);
-    } else if ((job.state === "queued" || job.state === "running") && !finished.has(id) && !active.has(id)) {
+    } else if (!finished.has(id) && !active.has(id)) {
       active.add(id);
       onChange(id, true, ctx);
     }
@@ -48,8 +57,8 @@ export function createSubagentJobObserver(
       const entry = session.getEntry(id);
       if (!entry) break;
       if (entry.type === "custom_message" && entry.customType === COMPLETION_TYPE) {
-        const job = record(entry.details);
-        if (typeof job?.state === "string" && TERMINAL_STATES.has(job.state)) observe(job);
+        const job = parseJobUpdate(entry.details);
+        if (job?.active === false) observe(job);
       }
       id = entry.parentId;
     }
@@ -77,11 +86,12 @@ export function createSubagentJobObserver(
     toolEnd(event: ToolExecutionEndEvent, context: ExtensionContext) {
       if (closed || !isInteractiveZellij(context) || event.isError || !JOB_TOOLS.has(event.toolName)) return;
       ctx = context;
-      const details = record(record(event.result)?.details);
+      const details = record(event.result)?.details;
       if (event.toolName === "subagent_inspect") {
-        if (Array.isArray(details?.jobs)) for (const job of details.jobs) observe(job);
+        const jobs = record(details)?.jobs;
+        if (Array.isArray(jobs)) for (const job of jobs) observe(parseJobUpdate(job));
       } else {
-        observe(details);
+        observe(parseJobUpdate(details));
       }
       readCompletions();
       schedule();

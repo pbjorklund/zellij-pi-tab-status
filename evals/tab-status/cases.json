@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "privacy": "public",
   "cases": [
     {
@@ -175,6 +175,12 @@
       "layer": 2,
       "category": "activity",
       "expected_test": "activity state: a later compaction does not replay a previous completion"
+    },
+    {
+      "id": "ignore-malformed-job-updates",
+      "layer": 2,
+      "category": "guard",
+      "expected_test": "job updates: malformed and unknown payloads cannot change activity"
     }
   ]
 }
