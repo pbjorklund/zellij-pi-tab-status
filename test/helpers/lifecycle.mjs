@@ -37,6 +37,7 @@ export function harness(t, options = {}) {
   const entries = new Map();
   let leaf = null;
   let entryReads = 0;
+  let abortedCommands = 0;
   const ctx = { cwd: "/repo", mode: "tui", hasUI: true, sessionManager: {
     getLeafId: () => leaf,
     getEntry: (id) => { entryReads++; return entries.get(id); },
@@ -81,7 +82,10 @@ export function harness(t, options = {}) {
           current.release.promise,
           new Promise((_, reject) => execOptions.signal?.addEventListener(
             "abort",
-            () => reject(new Error("command aborted")),
+            () => {
+              abortedCommands++;
+              reject(new Error("command aborted"));
+            },
             { once: true },
           )),
         ]);
@@ -125,6 +129,7 @@ export function harness(t, options = {}) {
     hasHandler: (name) => handlers.has(name),
     async emit(name, event) { await fire(name, event); await flush(); },
     entryReads: () => entryReads,
+    abortedCommands: () => abortedCommands,
     appendEntry(entry) {
       const id = `entry-${entries.size}`;
       entries.set(id, { ...entry, id, parentId: leaf });

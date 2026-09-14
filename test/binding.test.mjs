@@ -47,6 +47,7 @@ test("binding: shutdown during initial title lookup cannot acquire or rename a t
   h.fire("session_start");
   await held.entered.promise;
   await h.fire("session_shutdown");
+  assert.equal(h.abortedCommands(), 1);
   assert.deepEqual(h.writes, []);
   assert.equal(h.pipes.at(-1)?.kind, "remove");
 });

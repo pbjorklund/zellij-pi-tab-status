@@ -56,7 +56,10 @@ test("scheduling: shutdown cancels discovery retries and publishes one removal",
   h.setPaneOutput("not json");
   h.fire("session_start");
   await flush();
-  await h.fire("session_shutdown");
+  const firstShutdown = h.fire("session_shutdown");
+  const repeatedShutdown = h.fire("session_shutdown");
+  assert.strictEqual(repeatedShutdown, firstShutdown);
+  await firstShutdown;
   const removals = h.pipes.filter(({ kind }) => kind === "remove");
   assert.equal(removals.length, 1);
   const count = h.calls.length;
@@ -73,6 +76,15 @@ test("scheduling: shutdown removes a successfully delivered in-flight snapshot",
   held.release.resolve();
   await shutdown;
   assert.deepEqual(h.pipes.map(({ kind }) => kind), ["snapshot", "remove"]);
+});
+
+test("scheduling: shutdown removes an uncertain snapshot delivery", async (t) => {
+  const h = harness(t);
+  h.failPipes(1);
+  h.fire("session_start");
+  await flush();
+  await h.fire("session_shutdown");
+  assert.deepEqual(h.pipes.map(({ kind }) => kind), ["remove"]);
 });
 
 test("scheduling: a failed status pipe does not block the next transition", async (t) => {

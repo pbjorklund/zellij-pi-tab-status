@@ -6,9 +6,9 @@ import { runIgnoredCommand } from "../lib/commands.ts";
 function childProcess() {
   const child = new EventEmitter();
   child.unrefCalled = false;
-  child.killCalled = false;
+  child.killSignal = null;
   child.unref = () => { child.unrefCalled = true; };
-  child.kill = () => { child.killCalled = true; };
+  child.kill = (signal) => { child.killSignal = signal; };
   return child;
 }
 
@@ -31,15 +31,50 @@ test("commands: ignored transport resolves without captured streams", async () =
   assert.equal(child.unrefCalled, true);
 });
 
-test("commands: ignored transport rejects promptly when the child stalls", async () => {
+test("commands: ignored transport reports spawn and exit failures", async (t) => {
+  await t.test("synchronous spawn failure", async () => {
+    await assert.rejects(
+      runIgnoredCommand(() => { throw new Error("spawn failed"); }, "zellij", ["pipe"]),
+      /spawn failed/,
+    );
+  });
+
+  await t.test("child process error", async () => {
+    const child = childProcess();
+    const completed = runIgnoredCommand(() => child, "zellij", ["pipe"]);
+    child.emit("error", new Error("unavailable"));
+    await assert.rejects(completed, /unavailable/);
+  });
+
+  await t.test("nonzero exit", async () => {
+    const child = childProcess();
+    const completed = runIgnoredCommand(() => child, "zellij", ["pipe"]);
+    child.emit("close", 7, null);
+    await assert.rejects(completed, /exited with 7/);
+  });
+
+  await t.test("signal exit", async () => {
+    const child = childProcess();
+    const completed = runIgnoredCommand(() => child, "zellij", ["pipe"]);
+    child.emit("close", null, "SIGTERM");
+    await assert.rejects(completed, /exited with SIGTERM/);
+  });
+});
+
+test("commands: ignored transport kills a stall and waits for process close", async () => {
   const child = childProcess();
-  const started = performance.now();
+  let settled = false;
+  const completed = runIgnoredCommand(
+    () => child,
+    "zellij",
+    ["pipe"],
+    { timeoutMs: 20 },
+  ).finally(() => { settled = true; });
 
-  await assert.rejects(
-    runIgnoredCommand(() => child, "zellij", ["pipe"], { timeoutMs: 50 }),
-    /timed out/,
-  );
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(child.killSignal, "SIGKILL");
+  assert.equal(settled, false);
 
-  assert.ok(performance.now() - started < 200);
-  assert.equal(child.killCalled, true);
+  child.emit("close", null, "SIGTERM");
+  await assert.rejects(completed, /timed out/);
 });

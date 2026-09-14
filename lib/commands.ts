@@ -22,6 +22,7 @@ export function runIgnoredCommand(
     const child = spawnIgnored(command, args, { stdio: "ignore", windowsHide: true });
     child.unref();
     let settled = false;
+    let timedOut = false;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -30,12 +31,13 @@ export function runIgnoredCommand(
       else resolve();
     };
     const timeout = setTimeout(() => {
-      child.kill();
-      finish(new Error(`${command} timed out`));
+      timedOut = true;
+      child.kill("SIGKILL");
     }, options.timeoutMs ?? PIPE_TIMEOUT_MS);
     child.once("error", finish);
     child.once("close", (code, signal) => {
-      if (code === 0) finish();
+      if (timedOut) finish(new Error(`${command} timed out`));
+      else if (code === 0) finish();
       else finish(new Error(`${command} exited with ${code ?? signal ?? "unknown status"}`));
     });
   });

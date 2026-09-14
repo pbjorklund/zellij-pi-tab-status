@@ -5,10 +5,10 @@ export type { TabMode } from "./activity.ts";
 import {
   defaultExecFileAsync,
   defaultSpawnIgnored,
-  runIgnoredCommand,
   type ExecFileAsyncFn,
   type SpawnIgnoredFn,
 } from "./commands.ts";
+import { createStatusTransport } from "./status-transport.ts";
 import { createTabWriter, readTabByIdWith } from "./zellij.ts";
 import { createTabBinding } from "./tab-binding.ts";
 import { isInteractiveZellij } from "./status-model.ts";
@@ -34,7 +34,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     ...execOptions,
     signal: commandAbort.signal,
   });
-  const spawnIgnored = options.spawnIgnored ?? defaultSpawnIgnored;
+  const statusTransport = createStatusTransport(options.spawnIgnored ?? defaultSpawnIgnored);
   const now = options.now ?? Date.now;
   const runtimeId = options.runtimeId ?? randomUUID();
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
@@ -42,7 +42,6 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const bindings = createTabBinding(exec, now, retryDelay);
   let target: Target | null = null;
   let worker: Promise<void> | null = null;
-  let sending: Promise<boolean> | null = null;
   let pending: Target | null = null;
   let cancelRetry: (() => void) | null = null;
   let seenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,7 +49,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   let closing = false;
   let shutdown: Promise<void> | null = null;
   let seq = 0;
-  let published = false;
+  let snapshotAttempted = false;
   let delivered: Target | null = null;
 
   const paneId = () => {
@@ -75,40 +74,20 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     seenTimer = null;
   }
 
-  async function send(message: Record<string, unknown>) {
-    try {
-      await runIgnoredCommand(spawnIgnored, "zellij", [
-        "pipe", "--name", "pi_status", "--", JSON.stringify(message),
-      ]);
-      return true;
-    } catch {
-      // Status is best effort. A later lifecycle event can retry the snapshot.
-      return false;
-    }
-  }
-
   async function publish(snapshot: Target) {
     const id = paneId();
     if (id === null || !isInteractiveZellij(snapshot.ctx)) return false;
-    const delivery = (async () => {
-      const sent = await send({
-        v: 1,
-        kind: "snapshot",
-        runtime_id: runtimeId,
-        seq: ++seq,
-        pane_id: id,
-        mode: snapshot.mode,
-      });
-      if (sent) {
-        published = true;
-        delivered = snapshot;
-      }
-      return sent;
-    })();
-    sending = delivery;
-    return delivery.finally(() => {
-      if (sending === delivery) sending = null;
+    snapshotAttempted = true;
+    const sent = await statusTransport.send({
+      v: 1,
+      kind: "snapshot",
+      runtime_id: runtimeId,
+      seq: ++seq,
+      pane_id: id,
+      mode: snapshot.mode,
     });
+    if (sent) delivered = snapshot;
+    return sent;
   }
 
   async function refreshStaticTitle(snapshot: Target) {
@@ -185,10 +164,10 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       cancelRetry?.();
       commandAbort.abort();
       shutdown = (async () => {
-        await sending;
+        await statusTransport.drain();
         const id = paneId();
-        if (published && id !== null) {
-          await send({
+        if (snapshotAttempted && id !== null) {
+          await statusTransport.send({
             v: 1,
             kind: "remove",
             runtime_id: runtimeId,
