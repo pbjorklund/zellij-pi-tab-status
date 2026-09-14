@@ -64,6 +64,17 @@ test("scheduling: shutdown cancels discovery retries and publishes one removal",
   assert.equal(h.calls.length, count);
 });
 
+test("scheduling: shutdown removes a successfully delivered in-flight snapshot", async (t) => {
+  const h = harness(t);
+  const held = h.hold((_command, args) => args[0] === "pipe");
+  h.fire("session_start");
+  await held.entered.promise;
+  const shutdown = h.fire("session_shutdown");
+  held.release.resolve();
+  await shutdown;
+  assert.deepEqual(h.pipes.map(({ kind }) => kind), ["snapshot", "remove"]);
+});
+
 test("scheduling: a failed status pipe does not block the next transition", async (t) => {
   const h = harness(t);
   h.failPipes(1);

@@ -46,10 +46,9 @@ test("binding: shutdown during initial title lookup cannot acquire or rename a t
   const held = h.hold((command) => command === "git");
   h.fire("session_start");
   await held.entered.promise;
-  const shutdown = h.fire("session_shutdown");
-  held.release.resolve();
-  await shutdown;
+  await h.fire("session_shutdown");
   assert.deepEqual(h.writes, []);
+  assert.equal(h.pipes.at(-1)?.kind, "remove");
 });
 
 test("binding: an expired title refresh writes only the changed static title", async (t) => {

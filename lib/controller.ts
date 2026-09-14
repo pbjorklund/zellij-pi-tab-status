@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TabMode } from "./activity.ts";
 export type { TabMode } from "./activity.ts";
-import { defaultExecFileAsync, runCommand, type ExecFileAsyncFn } from "./commands.ts";
+import {
+  defaultExecFileAsync,
+  defaultSpawnIgnored,
+  runIgnoredCommand,
+  type ExecFileAsyncFn,
+  type SpawnIgnoredFn,
+} from "./commands.ts";
 import { createTabWriter, readTabByIdWith } from "./zellij.ts";
 import { createTabBinding } from "./tab-binding.ts";
 import { isInteractiveZellij } from "./status-model.ts";
@@ -11,6 +17,7 @@ const RETRY_DELAY_MS = 100;
 
 export type ZellijTabStatusOptions = {
   execFileAsync?: ExecFileAsyncFn;
+  spawnIgnored?: SpawnIgnoredFn;
   now?: () => number;
   runtimeId?: string;
   // Retained for callers that configured the former title-animation controller.
@@ -21,7 +28,13 @@ export type ZellijTabStatusOptions = {
 type Target = { ctx: ExtensionContext; mode: TabMode };
 
 export function createTabStatusController(options: ZellijTabStatusOptions = {}) {
-  const exec = options.execFileAsync ?? defaultExecFileAsync;
+  const baseExec = options.execFileAsync ?? defaultExecFileAsync;
+  const commandAbort = new AbortController();
+  const exec: ExecFileAsyncFn = (command, args, execOptions) => baseExec(command, args, {
+    ...execOptions,
+    signal: commandAbort.signal,
+  });
+  const spawnIgnored = options.spawnIgnored ?? defaultSpawnIgnored;
   const now = options.now ?? Date.now;
   const runtimeId = options.runtimeId ?? randomUUID();
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
@@ -29,6 +42,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const bindings = createTabBinding(exec, now, retryDelay);
   let target: Target | null = null;
   let worker: Promise<void> | null = null;
+  let sending: Promise<boolean> | null = null;
   let pending: Target | null = null;
   let cancelRetry: (() => void) | null = null;
   let seenTimer: ReturnType<typeof setTimeout> | null = null;
@@ -63,7 +77,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   async function send(message: Record<string, unknown>) {
     try {
-      await runCommand(exec, "zellij", [
+      await runIgnoredCommand(spawnIgnored, "zellij", [
         "pipe", "--name", "pi_status", "--", JSON.stringify(message),
       ]);
       return true;
@@ -76,19 +90,25 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   async function publish(snapshot: Target) {
     const id = paneId();
     if (id === null || !isInteractiveZellij(snapshot.ctx)) return false;
-    const sent = await send({
-      v: 1,
-      kind: "snapshot",
-      runtime_id: runtimeId,
-      seq: ++seq,
-      pane_id: id,
-      mode: snapshot.mode,
+    const delivery = (async () => {
+      const sent = await send({
+        v: 1,
+        kind: "snapshot",
+        runtime_id: runtimeId,
+        seq: ++seq,
+        pane_id: id,
+        mode: snapshot.mode,
+      });
+      if (sent) {
+        published = true;
+        delivered = snapshot;
+      }
+      return sent;
+    })();
+    sending = delivery;
+    return delivery.finally(() => {
+      if (sending === delivery) sending = null;
     });
-    if (sent) {
-      published = true;
-      delivered = snapshot;
-    }
-    return sent;
   }
 
   async function refreshStaticTitle(snapshot: Target) {
@@ -163,8 +183,9 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       pending = null;
       stopSeenTimer();
       cancelRetry?.();
+      commandAbort.abort();
       shutdown = (async () => {
-        await worker;
+        await sending;
         const id = paneId();
         if (published && id !== null) {
           await send({

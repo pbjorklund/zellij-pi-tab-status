@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import extension from "../../pi-extension.ts";
 
 export const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -48,13 +49,42 @@ export function harness(t, options = {}) {
     seenPollFirstDelayMs: options.seenPollFirstDelayMs,
     now: options.now,
     runtimeId: options.runtimeId,
+    spawnIgnored: (command, args, execOptions) => {
+      const child = new EventEmitter();
+      child.unref = () => {};
+      child.kill = () => {};
+      calls.push({ command, args, options: execOptions, at: Date.now() });
+      queueMicrotask(async () => {
+        if (gate?.matches(command, args)) {
+          const current = gate;
+          gate = undefined;
+          current.entered.resolve();
+          await current.release.promise;
+        }
+        if (pipeFailures > 0) {
+          pipeFailures--;
+          child.emit("error", new Error("pipe failed"));
+          return;
+        }
+        pipes.push(JSON.parse(args.at(-1)));
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
     execFileAsync: async (command, args, execOptions) => {
       calls.push({ command, args, options: execOptions, at: Date.now() });
       if (gate?.matches(command, args)) {
         const current = gate;
         gate = undefined;
         current.entered.resolve();
-        await current.release.promise;
+        await Promise.race([
+          current.release.promise,
+          new Promise((_, reject) => execOptions.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("command aborted")),
+            { once: true },
+          )),
+        ]);
       }
       if (command === "git") {
         if (args[0] === "rev-parse") {
@@ -72,14 +102,6 @@ export function harness(t, options = {}) {
       if (args[1] === "list-tabs") return { stdout: tabOutput ?? JSON.stringify([
         { tab_id: tabId, name: "repo:main", active },
       ]) };
-      if (args[0] === "pipe") {
-        if (pipeFailures > 0) {
-          pipeFailures--;
-          throw new Error("pipe failed");
-        }
-        pipes.push(JSON.parse(args.at(-1)));
-        return { stdout: "" };
-      }
       assert.equal(args[1], "rename-tab-by-id");
       if (renameFailures > 0) {
         renameFailures--;

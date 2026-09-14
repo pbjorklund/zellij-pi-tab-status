@@ -11,8 +11,10 @@ test("publisher: lifecycle transitions use snapshots instead of animated tab ren
   await h.tick(5_000);
 
   assert.equal(h.writes.length, writesAfterStart, "animation must not rename the tab");
-  assert.ok(h.calls.filter(({ command }) => command === "zellij")
-    .some(({ args }) => args[0] === "pipe" && !args.includes("action")));
+  const pipeCalls = h.calls.filter(({ command, args }) =>
+    command === "zellij" && args[0] === "pipe" && !args.includes("action"));
+  assert.ok(pipeCalls.length > 0);
+  assert.ok(pipeCalls.every(({ options }) => options.stdio === "ignore"));
   assert.deepEqual(h.pipes.slice(-2), [
     { v: 1, kind: "snapshot", runtime_id: "run-1", seq: 1, pane_id: 248, mode: "base" },
     { v: 1, kind: "snapshot", runtime_id: "run-1", seq: 2, pane_id: 248, mode: "working" },

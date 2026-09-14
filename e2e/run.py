@@ -21,6 +21,7 @@ class LiveTabStatus(unittest.TestCase):
     def setUp(self):
         for command in ("pi", "zellij", "git", "script"):
             self.assertIsNotNone(shutil.which(command), f"Install {command} to run live E2E tests")
+        real_zellij = shutil.which("zellij")
         # Keep Zellij's Unix socket path below the platform length limit.
         self.directory = tempfile.TemporaryDirectory(prefix="zpts-", dir="/tmp")
         self.addCleanup(self.directory.cleanup)
@@ -29,8 +30,25 @@ class LiveTabStatus(unittest.TestCase):
         self.repo.mkdir()
         self.session = "tab-status-e2e-" + uuid.uuid4().hex[:12]
         # No inherited credentials, PI config, Zellij session, or shell startup files.
+        bin_dir = self.home / "bin"
+        bin_dir.mkdir()
+        self.deliveries = self.home / "pi-status-deliveries.jsonl"
+        wrapper = bin_dir / "zellij"
+        wrapper.write_text('''#!/bin/sh
+"$REAL_ZELLIJ" "$@"
+status=$?
+if [ "$status" -eq 0 ] && [ "$1" = "pipe" ]; then
+    for payload do :; done
+    printf '%s\\n' "$payload" >> "$PI_STATUS_DELIVERIES"
+fi
+exit "$status"
+''')
+        wrapper.chmod(0o700)
         self.env = {
-            "PATH": os.environ["PATH"], "HOME": str(self.home), "SHELL": "/bin/sh",
+            "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+            "REAL_ZELLIJ": real_zellij,
+            "PI_STATUS_DELIVERIES": str(self.deliveries),
+            "HOME": str(self.home), "SHELL": "/bin/sh",
             "TERM": "xterm-256color", "LANG": "C.UTF-8",
             "XDG_CONFIG_HOME": str(self.home / "config"),
             "XDG_CACHE_HOME": str(self.home / "cache"),
@@ -127,6 +145,11 @@ class LiveTabStatus(unittest.TestCase):
     def mark(self, name):
         (self.home / name).touch()
 
+    def delivered_statuses(self):
+        if not self.deliveries.exists():
+            return []
+        return [json.loads(line) for line in self.deliveries.read_text().splitlines()]
+
     def settled(self):
         self.wait(lambda: (self.home / "parent-settled").exists(), "real agent_settled event")
 
@@ -148,10 +171,17 @@ class LiveTabStatus(unittest.TestCase):
         self.settled()
         self.assert_static_title()
         self.action("go-to-tab-by-id", str(self.tab))
-        self.send("/fixture shutdown")
+        started = time.monotonic()
+        self.send("/quit")
         self.wait(lambda: (self.home / "shutdown").exists(), "real session_shutdown event")
-        self.assert_static_title()
         self.wait(lambda: any(str(p["id"]) == self.pane and p["exited"] for p in self.panes()), "PI process exit")
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 0.25, f"PI shutdown took {elapsed:.3f}s")
+        self.wait(
+            lambda: any(message.get("kind") == "remove" for message in self.delivered_statuses()),
+            "successful remove pipe delivery",
+        )
+        self.assert_static_title()
 
     def test_modern_child_outlives_parent_without_title_animation(self):
         self.send("spawn")

@@ -82,7 +82,7 @@ Each test starts a real PI TUI in a separate Zellij session with temporary confi
 - `tab-binding.ts` owns binding retries and title caching.
 - `ownership.ts` parses pane/tab data and selects the owner. `zellij.ts` reads Zellij state and writes static titles.
 - `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts the job API and reads idle completions.
-- `status-model.ts` retains marker parsing compatibility for old titles; `tab-title.ts` derives Git/directory titles; `commands.ts` bounds command execution.
+- `status-model.ts` retains marker parsing compatibility for old titles; `tab-title.ts` derives Git/directory titles. `commands.ts` keeps stdout-reading commands captured and sends status pipes with ignored stdio and a 150 ms deadline.
 
 ## License
 
