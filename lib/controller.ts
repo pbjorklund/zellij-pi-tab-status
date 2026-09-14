@@ -37,6 +37,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   let shutdown: Promise<void> | null = null;
   let seq = 0;
   let published = false;
+  let delivered: Target | null = null;
 
   const paneId = () => {
     const value = Number(process.env.ZELLIJ_PANE_ID);
@@ -65,16 +66,17 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       await runCommand(exec, "zellij", [
         "pipe", "--name", "pi_status", "--", JSON.stringify(message),
       ]);
+      return true;
     } catch {
-      // Status is best effort. A later lifecycle transition repairs the snapshot.
+      // Status is best effort. A later lifecycle event can retry the snapshot.
+      return false;
     }
   }
 
   async function publish(snapshot: Target) {
     const id = paneId();
-    if (id === null || !isInteractiveZellij(snapshot.ctx)) return;
-    published = true;
-    await send({
+    if (id === null || !isInteractiveZellij(snapshot.ctx)) return false;
+    const sent = await send({
       v: 1,
       kind: "snapshot",
       runtime_id: runtimeId,
@@ -82,6 +84,11 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       pane_id: id,
       mode: snapshot.mode,
     });
+    if (sent) {
+      published = true;
+      delivered = snapshot;
+    }
+    return sent;
   }
 
   async function refreshStaticTitle(snapshot: Target) {
@@ -101,7 +108,8 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       while (pending && !closing) {
         const next = pending;
         pending = null;
-        await publish(next);
+        const sent = await publish(next);
+        if (sent && pending === next) pending = null;
         await refreshStaticTitle(next);
       }
     }).catch(() => {
@@ -133,7 +141,10 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   function setMode(ctx: ExtensionContext, mode: TabMode) {
     if (closing || !isInteractiveZellij(ctx)) return;
-    if (target?.mode === mode && target.ctx.cwd === ctx.cwd) return;
+    if (target?.mode === mode && target.ctx.cwd === ctx.cwd) {
+      if (delivered !== target) request(target);
+      return;
+    }
     target = { ctx, mode };
     stopSeenTimer();
     pollDelayMs = firstPollDelayMs;

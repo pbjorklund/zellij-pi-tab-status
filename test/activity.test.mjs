@@ -47,6 +47,26 @@ test("activity: current subagent jobs keep working after parent settlement", asy
   assert.equal(modes(h).at(-1), "done");
 });
 
+test("activity: same-mode subagent events repair a failed working snapshot", async (t) => {
+  const h = harness(t);
+  await h.emit("session_start");
+  h.failPipes(1);
+  await h.emit("agent_start");
+
+  h.fire("tool_execution_end", jobResult("job-one"));
+  h.fire("tool_execution_end", jobResult("job-two"));
+  h.fire("agent_settled");
+  await flush();
+
+  assert.equal(modes(h).at(-1), "working");
+  h.appendEntry(completion("job-one"));
+  await h.tick(500);
+  assert.equal(modes(h).at(-1), "working");
+  h.appendEntry(completion("job-two"));
+  await h.tick(500);
+  assert.equal(modes(h).at(-1), "done");
+});
+
 for (const state of ["completed", "partial", "failed", "timed_out", "cancelled"]) {
   test(`activity: current child ${state} completion publishes done`, async (t) => {
     const h = harness(t);
