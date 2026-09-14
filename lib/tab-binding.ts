@@ -2,8 +2,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import type { ExecFileAsyncFn } from "./commands.ts";
 import { pathsMatch } from "./ownership.ts";
-import { readOwningTabWith, readTabByIdWith } from "./zellij.ts";
 import { deriveTabTitle } from "./tab-title.ts";
+import { readOwningTabWith, readTabByIdWith } from "./zellij.ts";
 
 const VALIDATION_TTL_MS = 5_000;
 const TITLE_CACHE_TTL_MS = 30_000;
@@ -21,7 +21,6 @@ export function createTabBinding(
   exec: ExecFileAsyncFn,
   now: () => number,
   retryDelay: () => Promise<void>,
-  release: (binding: TabBinding, valid: () => boolean) => Promise<void>,
 ) {
   let binding: TabBinding | null = null;
   let titleCache: { cwd: string; title: string; at: number } | null = null;
@@ -47,10 +46,6 @@ export function createTabBinding(
         const cwd = owner.paneCwd ?? ctx.cwd;
         const baseName = await title(cwd);
         if (!valid()) return null;
-        if (binding && binding.tabId !== owner.tabId) {
-          await release(binding, valid);
-          if (!valid()) return null;
-        }
         binding = { tabId: owner.tabId, cwd, baseName, lastWrittenName: owner.name, validatedAt: now() };
         return binding;
       }
@@ -72,11 +67,6 @@ export function createTabBinding(
     current: () => binding,
     ensure,
     title,
-    isFresh() {
-      return binding !== null && binding.lastWrittenName !== null
-        && now() - binding.validatedAt < VALIDATION_TTL_MS
-        && titleCache !== null && now() - titleCache.at < TITLE_CACHE_TTL_MS;
-    },
     clear() {
       binding = null;
       titleCache = null;

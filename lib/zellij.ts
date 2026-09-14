@@ -54,13 +54,5 @@ export function createTabWriter(exec: ExecFileAsyncFn, retryDelay: () => Promise
     }
   }
 
-  return {
-    rename,
-    async release(bound: TabBinding, valid: () => boolean) {
-      if (bound.lastWrittenName === null || bound.lastWrittenName === bound.baseName) return;
-      const tab = await readTabByIdWith(exec, bound.tabId);
-      // A moved pane no longer owns this tab. Remove only our unchanged overlay.
-      if (valid() && tab?.name === bound.lastWrittenName) await rename(bound, bound.baseName, valid);
-    },
-  };
+  return { rename };
 }

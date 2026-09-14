@@ -1,12 +1,12 @@
 # zellij-pi-tab-status
 
-A PI extension that shows agent activity in the Zellij tab that owns the PI pane.
+A PI extension that publishes agent state to the `zellij-tabbar` vertical sidebar.
 
-While PI works, the tab name gets an animated spinner. When the full run settles in a background tab, the tab gets a `●` marker until you view it. The extension restores the descriptive base title when the tab becomes active or PI shuts down.
+While PI works, the sidebar shows an animated spinner beside the owning tab. When a background run settles, it shows `●` until you view that tab. Spinner frames are rendered inside the sidebar; they do not rename the tab every 500 ms.
 
 ## Install
 
-Add the Git package to `~/.pi/agent/settings.json`:
+Install the matching [zellij-tabbar](https://github.com/pbjorklund/zellij-tabbar) WASM and layout first. Then add this Git package to `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -16,27 +16,41 @@ Add the Git package to `~/.pi/agent/settings.json`:
 }
 ```
 
-Then run `pi update` or restart PI and approve package installation when prompted.
+Run `pi update` or restart PI and approve package installation when prompted.
 
 ## Behavior
 
 - Runs only in PI's TUI inside Zellij.
-- Finds the owning tab from `ZELLIJ_PANE_ID`, pane working directory, and Zellij application state. When the pane moves, removes its old overlay only if that tab's title has not been changed by someone else.
-- Uses `repository/path:branch` for Git worktrees and the directory name elsewhere.
-- Keeps the working spinner running while the parent agent or tracked subagents are working.
-- Caches the tab binding and Git title, so spinner frames need only the rename command.
-- Runs status updates in the background without blocking lifecycle hooks. Repeated subagent starts do not add commands or reset the spinner while the caches are fresh.
-- Waits 500 ms after each spinner update before scheduling the next, so slow commands cannot build a backlog.
-- Polls unviewed done tabs with exponential backoff to stay responsive without spawning constantly.
+- Sends a complete `pi_status` snapshot when state changes; it sends no animation frames.
+- Uses the stable Zellij pane ID, a runtime ID, and a monotonic sequence so moved panes and stale updates remain distinguishable.
+- Keeps the parent and tracked subagent state working until all work settles.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
-- Animates `◐ ◓ ◑ ◒` during manual and automatic compaction, then restores the correct state after success, failure, or cancellation.
-- Marks inactive tabs with `●` once the parent has settled and all tracked subagents have finished. Preserves completion received during compaction.
-- Restores the base name when the tab is viewed, on user input, or during shutdown.
-- Treats Zellij commands as best effort, so tab-status failures do not interrupt PI.
+- Publishes `compacting` during manual and automatic compaction, then restores the effective state after success, failure, or cancellation.
+- Publishes `done` once the parent has settled and all tracked subagents have finished. The visible sidebar clears it immediately; the extension confirms tab visibility with bounded backoff and publishes `base` so every sidebar instance converges.
+- Publishes a runtime-specific removal during shutdown.
+- Maintains a static `repository/path:branch` tab title for Git worktrees, or the directory name elsewhere. It changes the title only when the base title changes.
+- Coalesces event bursts and treats Zellij commands as best effort, so status failures do not block PI lifecycle hooks.
 
-Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` job API (`subagent_spawn`, `subagent_wait`, `subagent_cancel`, and `subagent_inspect` results). For the job API, it reads new `pi-subagents-completion` entries from in-memory session history every 500 ms while jobs are active. This also catches completions while the main agent is idle, without spawning processes or reading session files.
+Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` job API (`subagent_spawn`, `subagent_wait`, `subagent_cancel`, and `subagent_inspect` results). For the job API, it reads new `pi-subagents-completion` entries from in-memory session history every 500 ms while jobs are active. This catches completions while the main agent is idle without reading session files or spawning status-frame processes.
 
-The extension needs PI 0.84.3 or newer and a Zellij version that provides `list-panes`, `list-tabs`, and `rename-tab-by-id` actions.
+The extension needs PI 0.84.3 or newer and a Zellij version that provides `list-panes`, `list-tabs`, `rename-tab-by-id`, and `pipe`. Status markers require the matching custom sidebar; Zellij's built-in horizontal tab bar shows the static title only.
+
+## Status protocol
+
+The extension broadcasts version 1 JSON through `zellij pipe --name pi_status`. A snapshot has this shape:
+
+```json
+{
+  "v": 1,
+  "kind": "snapshot",
+  "runtime_id": "2b73...",
+  "seq": 4,
+  "pane_id": 248,
+  "mode": "working"
+}
+```
+
+`mode` is `base`, `working`, `compacting`, or `done`. Shutdown sends `kind: "remove"` with the same identity fields and no mode. Messages contain no prompt, command, cwd, tool argument, or conversation content.
 
 ## Development
 
@@ -48,9 +62,7 @@ npm run test:coverage
 npm run eval
 ```
 
-CI enforces at least 95% aggregate line, branch, and function coverage across `pi-extension.ts` and `lib/*.ts`. This measures the unit and integration tests together, not live E2E coverage. Test fixtures are not production source.
-
-The eval wrapper runs every test file, records no model output, and makes no network calls. Tests cover title derivation (including real temporary Git worktrees), tab ownership, lifecycle handling, command counts, and non-Zellij guards. Lifecycle tests share their setup, mock timers, and stalled-command fixtures to check polling backoff, event bursts, and shutdown races without wall-clock sleeps. Public-API and Git-title tests run in separate files.
+CI enforces at least 95% aggregate line, branch, and function coverage across `pi-extension.ts` and `lib/*.ts`. The eval wrapper runs every test file, records no model output, and makes no network calls.
 
 ### Live smoke and E2E tests
 
@@ -61,25 +73,16 @@ npm run test:smoke
 npm run test:e2e
 ```
 
-CI runs both commands with PI 0.85.1 and Zellij 0.45.0. Missing executables fail the tests; they are not skipped.
-
-Each test starts a real PI TUI in a separate Zellij session with a temporary Git repository, HOME, and config. The runner passes no inherited credentials or user settings, addresses only its own session, and cleans up after success or failure. No model API calls are made.
-
-The smoke test checks advancing work frames, completion in a background tab, clearing on view, and title restoration when PI exits. The full suite also checks a modern child job that outlives its parent, legacy child completion during compaction, and cancelled compaction. Every title check also verifies that the control tab is unchanged.
-
-PI dispatches the real tool, lifecycle, compaction, and session-history events; Zellij performs the actual tab writes. `e2e/fixture.ts` supplies local model responses, child-protocol payloads, and compaction results/cancellation. These tests do not run an external model or the installed subagent package. The Python runner has separate cleanup regression tests.
+Each test starts a real PI TUI in a separate Zellij session with temporary configuration and no inherited credentials. These extension tests verify lifecycle handling, successful pipe publication, static title behavior, and cleanup. The `zellij-tabbar` repository's isolated live smoke test verifies status rendering, local animation, background completion, and clearing on view with the real WASM plugin.
 
 ### Structure
 
-`pi-extension.ts` registers lifecycle handlers. The modules separate state, scheduling, and command execution:
-
-- `controller.ts` coalesces updates, schedules animation and polling, and orders teardown.
-- `tab-binding.ts` owns binding retries and the title cache.
-- `ownership.ts` parses pane/tab data and selects the owner without running commands. `zellij.ts` reads Zellij state and handles rename retries and overlay cleanup.
+- `pi-extension.ts` registers lifecycle handlers.
+- `controller.ts` coalesces semantic snapshots, sends pipes, maintains the static title, and orders teardown.
+- `tab-binding.ts` owns binding retries and title caching.
+- `ownership.ts` parses pane/tab data and selects the owner. `zellij.ts` reads Zellij state and writes static titles.
 - `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts the job API and reads idle completions.
-- `status-model.ts` formats markers; `tab-title.ts` derives Git/directory titles; `commands.ts` bounds command execution.
-
-All modules live in `lib/`. Public exports remain in `pi-extension.ts`.
+- `status-model.ts` retains marker parsing compatibility for old titles; `tab-title.ts` derives Git/directory titles; `commands.ts` bounds command execution.
 
 ## License
 

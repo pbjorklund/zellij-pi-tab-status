@@ -14,8 +14,7 @@ import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKING = re.compile(r"^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$")
-COMPACTING = re.compile(r"^[◐◓◑◒] repo:main$")
+STATUS_PREFIX = re.compile(r"^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒●] ")
 
 
 class LiveTabStatus(unittest.TestCase):
@@ -117,9 +116,9 @@ class LiveTabStatus(unittest.TestCase):
     def wait_name(self, predicate, description):
         return self.wait(lambda: name if (name := self.tab_name()) is not None and predicate(name) else None, description)
 
-    def animated(self, pattern):
-        first = self.wait_name(pattern.fullmatch, "first animation frame")
-        self.wait_name(lambda name: name != first and pattern.fullmatch(name), "next animation frame")
+    def assert_static_title(self):
+        name = self.wait_name(lambda value: value == "repo:main", "static base title")
+        self.assertIsNone(STATUS_PREFIX.match(name))
 
     def send(self, text):
         self.action("write-chars", "--pane-id", self.pane, text)
@@ -141,54 +140,46 @@ class LiveTabStatus(unittest.TestCase):
                 os.killpg(self.client.pid, signal.SIGKILL)
                 self.client.communicate(timeout=3)
 
-    def test_parent_completion_seen_and_shutdown(self):
+    def test_parent_status_uses_pipe_without_mutating_the_title(self):
         self.send("hold")
-        self.animated(WORKING)
+        self.assert_static_title()
         self.action("go-to-tab-name", "control")
         self.mark("release-parent")
         self.settled()
-        self.wait_name(lambda name: name == "● repo:main", "unseen completion")
+        self.assert_static_title()
         self.action("go-to-tab-by-id", str(self.tab))
-        self.wait_name(lambda name: name == "repo:main", "viewed completion clears")
-        self.send("/fixture legacy-start")
-        self.animated(WORKING)
         self.send("/fixture shutdown")
         self.wait(lambda: (self.home / "shutdown").exists(), "real session_shutdown event")
-        self.wait_name(lambda name: name == "repo:main", "shutdown restores title")
+        self.assert_static_title()
         self.wait(lambda: any(str(p["id"]) == self.pane and p["exited"] for p in self.panes()), "PI process exit")
 
-    def test_modern_child_outlives_parent(self):
+    def test_modern_child_outlives_parent_without_title_animation(self):
         self.send("spawn")
         self.settled()
-        self.animated(WORKING)
-        self.action("go-to-tab-name", "control")
+        self.assert_static_title()
         self.send("/fixture modern-complete")
-        self.wait_name(lambda name: name == "● repo:main", "idle custom completion reaches observer")
-        self.action("go-to-tab-by-id", str(self.tab))
-        self.wait_name(lambda name: name == "repo:main", "viewed child completion clears")
+        self.assert_static_title()
 
-    def test_legacy_completion_during_compaction(self):
+    def test_legacy_completion_during_compaction_keeps_static_title(self):
         self.send("seed")
         self.settled()
         self.send("/fixture legacy-start")
-        self.animated(WORKING)
         self.send("/compact")
-        self.animated(COMPACTING)
-        self.action("go-to-tab-name", "control")
+        self.assert_static_title()
         self.mark("complete-legacy")
         self.mark("release-compaction")
         self.wait(lambda: (self.home / "compacted").exists(), "real session_compact event")
-        self.wait_name(lambda name: name == "● repo:main", "completion preserved through compaction")
+        self.assert_static_title()
 
-    def test_cancelled_compaction_restores_idle(self):
+    def test_cancelled_compaction_keeps_static_title(self):
         self.send("seed")
         self.settled()
         self.send("/compact")
-        self.animated(COMPACTING)
+        self.assert_static_title()
         self.mark("cancel-compaction")
         self.mark("release-compaction")
         self.wait(lambda: (self.home / "compaction-failed").exists(), "real session_compact_failed event")
-        self.wait_name(lambda name: name == "repo:main", "cancelled compaction clears overlay")
+        self.assert_static_title()
 
 
 if __name__ == "__main__":

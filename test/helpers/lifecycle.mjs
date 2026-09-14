@@ -23,12 +23,14 @@ export function harness(t, options = {}) {
   const handlers = new Map();
   const calls = [];
   const writes = [];
+  const pipes = [];
   let tabId = 26;
   let branch = "main";
   let active = false;
   let paneOutput;
   let tabOutput;
   let renameFailures = 0;
+  let pipeFailures = 0;
   let gate;
   const heldCommands = [];
   const entries = new Map();
@@ -45,6 +47,7 @@ export function harness(t, options = {}) {
     spinnerIntervalMs: options.spinnerIntervalMs,
     seenPollFirstDelayMs: options.seenPollFirstDelayMs,
     now: options.now,
+    runtimeId: options.runtimeId,
     execFileAsync: async (command, args, execOptions) => {
       calls.push({ command, args, options: execOptions, at: Date.now() });
       if (gate?.matches(command, args)) {
@@ -69,6 +72,14 @@ export function harness(t, options = {}) {
       if (args[1] === "list-tabs") return { stdout: tabOutput ?? JSON.stringify([
         { tab_id: tabId, name: "repo:main", active },
       ]) };
+      if (args[0] === "pipe") {
+        if (pipeFailures > 0) {
+          pipeFailures--;
+          throw new Error("pipe failed");
+        }
+        pipes.push(JSON.parse(args.at(-1)));
+        return { stdout: "" };
+      }
       assert.equal(args[1], "rename-tab-by-id");
       if (renameFailures > 0) {
         renameFailures--;
@@ -88,7 +99,7 @@ export function harness(t, options = {}) {
     await fire("session_shutdown");
   });
   return {
-    fire, calls, writes,
+    fire, calls, writes, pipes,
     hasHandler: (name) => handlers.has(name),
     async emit(name, event) { await fire(name, event); await flush(); },
     entryReads: () => entryReads,
@@ -105,6 +116,7 @@ export function harness(t, options = {}) {
     setPaneOutput(value) { paneOutput = value; },
     setTabOutput(value) { tabOutput = value; },
     failRenames(count) { renameFailures = count; },
+    failPipes(count) { pipeFailures = count; },
     hold(matches) {
       const held = { matches, entered: deferred(), release: deferred() };
       gate = held;

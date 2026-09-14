@@ -1,18 +1,120 @@
 {
-  "version": 6,
+  "version": 8,
   "privacy": "public",
   "cases": [
     {
-      "id": "working-status-format",
+      "id": "publish-lifecycle-snapshots",
       "layer": 2,
-      "category": "activity",
-      "expected_test": "status formatters cycle frames and mark unseen completion"
+      "category": "transport",
+      "expected_test": "publisher: lifecycle transitions use snapshots instead of animated tab renames"
+    },
+    {
+      "id": "coalesce-duplicate-state",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "publisher: duplicate modes are coalesced and shutdown removes only its runtime"
+    },
+    {
+      "id": "no-animation-processes",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "perf: active work has no transport or title animation timer"
+    },
+    {
+      "id": "burst-latest-state",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: burst updates coalesce to the latest semantic state"
+    },
+    {
+      "id": "subagent-burst-no-transport",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: repeated same-mode subagent events add no transport"
+    },
+    {
+      "id": "nonblocking-lifecycle",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "scheduling: lifecycle hooks do not wait for stalled Zellij"
+    },
+    {
+      "id": "failed-pipe-recovers",
+      "layer": 2,
+      "category": "recovery",
+      "expected_test": "scheduling: a failed status pipe does not block the next transition"
+    },
+    {
+      "id": "shutdown-runtime-removal",
+      "layer": 2,
+      "category": "recovery",
+      "expected_test": "scheduling: shutdown cancels discovery retries and publishes one removal"
+    },
+    {
+      "id": "viewed-done-converges",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "scheduling: viewing a done tab publishes base to every sidebar instance"
+    },
+    {
+      "id": "invalid-pane-rejected",
+      "layer": 2,
+      "category": "guard",
+      "expected_test": "scheduling: invalid pane identity publishes nothing"
     },
     {
       "id": "reject-non-tui",
       "layer": 2,
       "category": "guard",
       "expected_test": "isInteractiveZellij requires TUI mode and Zellij"
+    },
+    {
+      "id": "compaction-transition",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: compaction and settlement publish semantic transitions"
+    },
+    {
+      "id": "compaction-failure-recovers",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "lifecycle: failed compaction restores the effective work state"
+    },
+    {
+      "id": "completion-survives-compaction",
+      "layer": 2,
+      "category": "lifecycle",
+      "expected_test": "activity: child completion during session_compact remains done"
+    },
+    {
+      "id": "job-child-outlives-parent",
+      "layer": 2,
+      "category": "activity",
+      "expected_test": "activity: current subagent jobs keep working after parent settlement"
+    },
+    {
+      "id": "job-tail-polling-budget",
+      "layer": 2,
+      "category": "performance",
+      "expected_test": "activity: job polling reads only new entries and stops after completion"
+    },
+    {
+      "id": "static-title-migration",
+      "layer": 2,
+      "category": "title",
+      "expected_test": "binding: startup replaces a legacy animated title with the static base title"
+    },
+    {
+      "id": "static-title-no-markers",
+      "layer": 2,
+      "category": "title",
+      "expected_test": "binding: an expired title refresh writes only the changed static title"
+    },
+    {
+      "id": "rename-failure-invalidates-binding",
+      "layer": 2,
+      "category": "recovery",
+      "expected_test": "binding: a failed static rename retries and invalidates the binding"
     },
     {
       "id": "reject-different-cwd",
@@ -27,160 +129,10 @@
       "expected_test": "deriveTabTitle uses repo path and branch without an external helper"
     },
     {
-      "id": "mid-run-compaction-stays-working",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "lifecycle: mid-run threshold compaction keeps the working marker"
-    },
-    {
-      "id": "retry-gaps-stay-working",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "lifecycle: auto-retry and queued follow-up gaps do not mark done"
-    },
-    {
-      "id": "compaction-failure-recovers",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "lifecycle: failed compaction recovers and does not stay stuck"
-    },
-    {
-      "id": "overflow-retry-stays-working",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "lifecycle: overflow compaction retry keeps work marked until settled"
-    },
-    {
-      "id": "active-tab-settle-restores-title",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "lifecycle: active tab restores the base name instead of marking done"
-    },
-    {
-      "id": "settle-within-ttl-no-spawns",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: settle within TTL reuses the binding with no panes or git spawns"
-    },
-    {
-      "id": "stale-binding-single-panes-fetch",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: stale binding re-validates with exactly one panes fetch"
-    },
-    {
-      "id": "stale-title-single-refetch",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: stale title cache refetches git exactly once"
-    },
-    {
-      "id": "rename-failure-invalidates-binding",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: failed rename invalidates the binding so the next event rebinds"
-    },
-    {
-      "id": "done-tab-poll-backoff",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: unviewed done tab polls with backoff, not a fixed flood"
-    },
-    {
-      "id": "nonblocking-lifecycle",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "scheduling: lifecycle hooks do not wait for stalled Zellij"
-    },
-    {
-      "id": "subagent-burst-no-spawns",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "scheduling: sequential subagent events preserve the spinner deadline"
-    },
-    {
-      "id": "slow-spinner-no-catchup",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "scheduling: slow spinner writes leave a full interval before the next frame"
-    },
-    {
-      "id": "stale-poll-preserves-work",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "scheduling: a stale seen poll cannot erase new work"
-    },
-    {
-      "id": "shutdown-orders-restore",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "scheduling: shutdown restores base after an in-flight spinner write"
-    },
-    {
       "id": "literal-bounded-commands",
       "layer": 2,
       "category": "guard",
       "expected_test": "commands: titles remain literal argv with bounded execution"
-    },
-    {
-      "id": "real-git-title-variants",
-      "layer": 2,
-      "category": "title",
-      "expected_test": "titles: real Git unborn branch, detached HEAD, and linked worktree"
-    },
-    {
-      "id": "compaction-animates-without-parent",
-      "layer": 2,
-      "category": "activity",
-      "expected_test": "scheduling: threshold compaction animates without parent work"
-    },
-    {
-      "id": "job-api-child-only-activity",
-      "layer": 2,
-      "category": "activity",
-      "expected_test": "scheduling: current subagent jobs animate after parent settlement and finish while idle"
-    },
-    {
-      "id": "legacy-and-current-subagents",
-      "layer": 2,
-      "category": "activity",
-      "expected_test": "scheduling: legacy and current subagents can keep the same parent idle"
-    },
-    {
-      "id": "job-tail-polling-budget",
-      "layer": 2,
-      "category": "performance",
-      "expected_test": "scheduling: job polling reads only the new tail and stops on shutdown"
-    },
-    {
-      "id": "completion-survives-compaction",
-      "layer": 2,
-      "category": "lifecycle",
-      "expected_test": "activity: legacy completion during session_compact remains unseen"
-    },
-    {
-      "id": "pane-move-removes-owned-overlay",
-      "layer": 2,
-      "category": "ownership",
-      "expected_test": "scheduling: moving a pane restores its old owned overlay"
-    },
-    {
-      "id": "new-work-overrides-compaction-completion",
-      "layer": 2,
-      "category": "activity",
-      "expected_test": "activity state: new work takes precedence over completion during compaction"
-    },
-    {
-      "id": "compaction-does-not-replay-completion",
-      "layer": 2,
-      "category": "activity",
-      "expected_test": "activity state: a later compaction does not replay a previous completion"
-    },
-    {
-      "id": "ignore-malformed-job-updates",
-      "layer": 2,
-      "category": "guard",
-      "expected_test": "job updates: malformed and unknown payloads cannot change activity"
     }
   ]
 }

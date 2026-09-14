@@ -2,131 +2,44 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { harness } from "./helpers/lifecycle.mjs";
 
-const working = /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] repo:main$/;
-const count = (h, command, action) => h.calls.filter((call) =>
-  call.command === command && (action === undefined || call.args[1] === action)).length;
+const modes = (h) => h.pipes.flatMap((message) => message.kind === "snapshot" ? [message.mode] : []);
 
-test("lifecycle: mid-run threshold compaction keeps the working marker", async (t) => {
-  const h = harness(t);
+test("lifecycle: compaction and settlement publish semantic transitions", async (t) => {
+  const h = harness(t, { runtimeId: "lifecycle" });
   await h.start();
-  assert.match(h.writes.at(-1).name, working);
-  // Threshold compaction can happen between tool calls, without ending the run.
   await h.emit("session_before_compact", { reason: "threshold", willRetry: false });
-  assert.equal(h.writes.at(-1).name, "◐ repo:main");
   await h.emit("session_compact", { reason: "threshold", willRetry: false });
-  assert.match(h.writes.at(-1).name, working);
   await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "● repo:main");
-});
 
-test("lifecycle: auto-retry and queued follow-up gaps do not mark done", async (t) => {
-  const h = harness(t);
-  await h.start();
-  // Low-level agent_end is deliberately not a completion signal.
+  assert.deepEqual(modes(h), ["base", "working", "compacting", "working", "done"]);
   assert.equal(h.hasHandler("agent_end"), false);
-  await h.tick(500);
-  assert.match(h.writes.at(-1).name, working);
-  await h.emit("agent_start");
-  await h.tick(500);
-  assert.match(h.writes.at(-1).name, working);
-  await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "● repo:main");
 });
 
-test("lifecycle: failed compaction recovers and does not stay stuck", async (t) => {
+test("lifecycle: failed compaction restores the effective work state", async (t) => {
   const h = harness(t);
   await h.start();
-  await h.emit("session_before_compact", { reason: "threshold", willRetry: false });
-  await h.emit("session_compact_failed", {
-    reason: "threshold", errorMessage: "summarization failed", aborted: false, willRetry: false,
-  });
-  assert.match(h.writes.at(-1).name, working);
-  await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "● repo:main");
+  await h.emit("session_before_compact");
+  await h.emit("session_compact_failed", { aborted: false });
+  assert.deepEqual(modes(h).slice(-2), ["compacting", "working"]);
 });
 
-test("lifecycle: overflow compaction retry keeps work marked until settled", async (t) => {
+test("perf: active work has no transport or title animation timer", async (t) => {
   const h = harness(t);
   await h.start();
-  assert.equal(h.hasHandler("agent_end"), false);
-  await h.emit("session_before_compact", { reason: "overflow", willRetry: true });
-  assert.equal(h.writes.at(-1).name, "◐ repo:main");
-  await h.emit("session_compact", { reason: "overflow", willRetry: true });
-  assert.match(h.writes.at(-1).name, working);
-  await h.emit("agent_start");
-  await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "● repo:main");
+  const calls = h.calls.length;
+  const writes = h.writes.length;
+  await h.tick(60_000);
+  assert.equal(h.calls.length, calls);
+  assert.equal(h.writes.length, writes);
 });
 
-test("lifecycle: active tab restores the base name instead of marking done", async (t) => {
-  const h = harness(t);
-  h.setActive(true);
-  await h.start();
-  await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "repo:main");
-});
-
-test("lifecycle: working marker animates while work stays active", async (t) => {
-  const h = harness(t, { spinnerIntervalMs: 5 });
-  await h.start();
-  const before = h.writes.length;
-  for (let i = 0; i < 3; i++) await h.tick(5);
-  assert.deepEqual(h.writes.slice(before).map(({ name }) => name), [
-    "⠙ repo:main", "⠹ repo:main", "⠸ repo:main",
-  ]);
-  await h.emit("agent_settled");
-  assert.equal(h.writes.at(-1).name, "● repo:main");
-});
-
-test("perf: settle within TTL reuses the binding with no panes or git spawns", async (t) => {
+test("perf: transitions within the binding TTL do not repeat discovery or Git reads", async (t) => {
   const h = harness(t);
   await h.start();
-  const panes = count(h, "zellij", "list-panes");
-  const git = count(h, "git");
-  await h.tick(1_000);
+  const panes = h.calls.filter(({ args }) => args[1] === "list-panes").length;
+  const git = h.calls.filter(({ command }) => command === "git").length;
   await h.emit("agent_settled");
-  assert.equal(count(h, "zellij", "list-panes"), panes);
-  assert.equal(count(h, "git"), git);
-  assert.equal(h.writes.at(-1).name, "● repo:main");
-});
-
-test("perf: stale binding re-validates with exactly one panes fetch", async (t) => {
-  const h = harness(t);
-  await h.start();
-  const panes = count(h, "zellij", "list-panes");
-  const tabs = count(h, "zellij", "list-tabs");
-  await h.tick(6_000);
-  await h.emit("agent_settled");
-  assert.equal(count(h, "zellij", "list-panes") - panes, 1);
-  assert.equal(count(h, "zellij", "list-tabs") - tabs, 2);
-});
-
-test("perf: stale title cache refetches git exactly once", async (t) => {
-  const h = harness(t);
-  await h.start();
-  const git = count(h, "git");
-  await h.tick(31_000);
-  await h.emit("agent_settled");
-  assert.equal(count(h, "git") - git, 3);
-});
-
-test("perf: failed rename invalidates the binding so the next event rebinds", async (t) => {
-  const h = harness(t);
-  h.failRenames(2);
-  await h.start();
-  await h.tick(100);
-  assert.equal(count(h, "zellij", "rename-tab-by-id"), 2);
-  assert.deepEqual(h.writes, []);
-  await h.emit("agent_settled");
-  assert.ok(count(h, "zellij", "list-panes") >= 2);
-});
-
-test("perf: unviewed done tab polls with backoff, not a fixed flood", async (t) => {
-  const h = harness(t, { seenPollFirstDelayMs: 5 });
-  await h.start();
-  await h.emit("agent_settled");
-  const tabs = count(h, "zellij", "list-tabs");
-  for (const delay of [5, 10, 20, 40]) await h.tick(delay);
-  await h.tick(25);
-  assert.equal(count(h, "zellij", "list-tabs") - tabs, 4);
+  assert.equal(h.calls.filter(({ args }) => args[1] === "list-panes").length, panes);
+  assert.equal(h.calls.filter(({ command }) => command === "git").length, git);
+  assert.equal(h.pipes.at(-1).mode, "done");
 });

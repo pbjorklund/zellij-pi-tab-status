@@ -1,47 +1,47 @@
+import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TabMode } from "./activity.ts";
 export type { TabMode } from "./activity.ts";
-import { defaultExecFileAsync, type ExecFileAsyncFn } from "./commands.ts";
+import { defaultExecFileAsync, runCommand, type ExecFileAsyncFn } from "./commands.ts";
 import { createTabWriter, readTabByIdWith } from "./zellij.ts";
 import { createTabBinding } from "./tab-binding.ts";
-import { formatCompactingTabName, formatDoneTabName, formatWorkingTabName, isInteractiveZellij } from "./status-model.ts";
+import { isInteractiveZellij } from "./status-model.ts";
 
 const RETRY_DELAY_MS = 100;
-const SEEN_POLL_MAX_DELAY_MS = 2_000;
 
 export type ZellijTabStatusOptions = {
   execFileAsync?: ExecFileAsyncFn;
+  now?: () => number;
+  runtimeId?: string;
+  // Retained for callers that configured the former title-animation controller.
   spinnerIntervalMs?: number;
   seenPollFirstDelayMs?: number;
-  now?: () => number;
 };
 
 type Target = { ctx: ExtensionContext; mode: TabMode };
-type Update = "event" | "frame" | "poll";
 
 export function createTabStatusController(options: ZellijTabStatusOptions = {}) {
   const exec = options.execFileAsync ?? defaultExecFileAsync;
   const now = options.now ?? Date.now;
-  const spinnerIntervalMs = options.spinnerIntervalMs ?? 500;
+  const runtimeId = options.runtimeId ?? randomUUID();
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
-  let target: Target | null = null;
   const writer = createTabWriter(exec, retryDelay);
-  const bindings = createTabBinding(exec, now, retryDelay, writer.release);
+  const bindings = createTabBinding(exec, now, retryDelay);
+  let target: Target | null = null;
   let worker: Promise<void> | null = null;
-  let pending: Update | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: Target | null = null;
   let cancelRetry: (() => void) | null = null;
+  let seenTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollDelayMs = firstPollDelayMs;
   let closing = false;
   let shutdown: Promise<void> | null = null;
-  let frame = 0;
-  let pollDelayMs = firstPollDelayMs;
+  let seq = 0;
+  let published = false;
 
-  const current = (snapshot: Target) => !closing && target === snapshot;
-
-  function stopTimer() {
-    if (timer !== null) clearTimeout(timer);
-    timer = null;
-  }
+  const paneId = () => {
+    const value = Number(process.env.ZELLIJ_PANE_ID);
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  };
 
   function retryDelay() {
     return new Promise<void>((resolve) => {
@@ -55,99 +55,115 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     });
   }
 
-  async function render(snapshot: Target, update: Update) {
-    if (update === "event") {
-      const bound = await bindings.ensure(snapshot.ctx, () => current(snapshot));
-      if (!bound || !current(snapshot)) return;
-      const baseName = await bindings.title(bound.cwd);
-      if (!current(snapshot)) return;
-      bound.baseName = baseName;
-    }
-    const bound = bindings.current();
-    if (!bound || !current(snapshot)) return;
-    let name = bound.baseName;
-    if (snapshot.mode === "working") {
-      name = formatWorkingTabName(bound.baseName, frame++);
-    } else if (snapshot.mode === "compacting") {
-      name = formatCompactingTabName(bound.baseName, frame++);
-    } else if (snapshot.mode === "done") {
-      const tab = await readTabByIdWith(exec, bound.tabId);
-      if (!current(snapshot)) return;
-      if (tab?.active) {
-        const baseName = await bindings.title(bound.cwd);
-        if (!current(snapshot)) return;
-        bound.baseName = name = baseName;
-        target = { ...snapshot, mode: "base" };
-        snapshot = target;
-      } else {
-        name = formatDoneTabName(bound.baseName);
-        if (update === "poll") pollDelayMs = Math.min(pollDelayMs * 2, SEEN_POLL_MAX_DELAY_MS);
-      }
-    }
-    await writer.rename(bound, name, () => current(snapshot));
+  function stopSeenTimer() {
+    if (seenTimer !== null) clearTimeout(seenTimer);
+    seenTimer = null;
   }
 
-  function scheduleNext() {
-    if (closing || !bindings.current() || !target || timer !== null) return;
-    const animated = target.mode === "working" || target.mode === "compacting";
-    const update = animated ? "frame" : target.mode === "done" ? "poll" : null;
-    if (!update) return;
-    timer = setTimeout(() => {
-      timer = null;
-      request(update);
-    }, update === "frame" ? spinnerIntervalMs : pollDelayMs);
-    timer.unref?.();
+  async function send(message: Record<string, unknown>) {
+    try {
+      await runCommand(exec, "zellij", [
+        "pipe", "--name", "pi_status", "--", JSON.stringify(message),
+      ]);
+    } catch {
+      // Status is best effort. A later lifecycle transition repairs the snapshot.
+    }
   }
 
-  function request(update: Update) {
-    if (closing) return;
-    pending = update;
-    if (worker) return;
-    // Defer the drain so a burst of lifecycle events becomes one latest-state
-    // update, rather than a queue of stale tab commands that blocks PI.
-    worker = Promise.resolve().then(async () => {
-      while (pending && target && !closing) {
-        const next = pending;
-        pending = null;
-        await render(target, next);
-      }
-    }).catch(() => {
-      // Status is best effort, including unexpected adapter failures.
-    }).finally(() => {
-      worker = null;
-      if (pending && !closing) request(pending);
-      else scheduleNext();
+  async function publish(snapshot: Target) {
+    const id = paneId();
+    if (id === null || !isInteractiveZellij(snapshot.ctx)) return;
+    published = true;
+    await send({
+      v: 1,
+      kind: "snapshot",
+      runtime_id: runtimeId,
+      seq: ++seq,
+      pane_id: id,
+      mode: snapshot.mode,
     });
   }
 
-  return {
-    setMode(ctx: ExtensionContext, mode: TabMode) {
-      if (closing || !isInteractiveZellij(ctx)) return;
-      if (target?.mode === mode && target.ctx.cwd === ctx.cwd) {
-        if ((worker && !bindings.current()) || bindings.isFresh()) return;
+  async function refreshStaticTitle(snapshot: Target) {
+    const current = () => !closing && target === snapshot;
+    const bound = await bindings.ensure(snapshot.ctx, current);
+    if (!bound || !current()) return;
+    const baseName = await bindings.title(bound.cwd);
+    if (!current()) return;
+    bound.baseName = baseName;
+    await writer.rename(bound, baseName, current);
+  }
+
+  function request(snapshot: Target) {
+    pending = snapshot;
+    if (worker) return;
+    worker = Promise.resolve().then(async () => {
+      while (pending && !closing) {
+        const next = pending;
+        pending = null;
+        await publish(next);
+        await refreshStaticTitle(next);
       }
-      target = { ctx, mode };
-      stopTimer();
-      cancelRetry?.();
-      frame = 0;
-      pollDelayMs = firstPollDelayMs;
-      request("event");
-    },
+    }).catch(() => {
+      // Lifecycle hooks must not fail because status or title updates failed.
+    }).finally(() => {
+      worker = null;
+      if (pending && !closing) request(pending);
+      else scheduleSeenPoll();
+    });
+  }
+
+  function scheduleSeenPoll() {
+    if (closing || seenTimer !== null || target?.mode !== "done") return;
+    const snapshot = target;
+    seenTimer = setTimeout(async () => {
+      seenTimer = null;
+      const bound = bindings.current();
+      const tab = bound ? await readTabByIdWith(exec, bound.tabId) : null;
+      if (closing || target !== snapshot) return;
+      if (tab?.active) {
+        setMode(snapshot.ctx, "base");
+      } else {
+        pollDelayMs = Math.min(pollDelayMs * 2, 2_000);
+        scheduleSeenPoll();
+      }
+    }, pollDelayMs);
+    seenTimer.unref?.();
+  }
+
+  function setMode(ctx: ExtensionContext, mode: TabMode) {
+    if (closing || !isInteractiveZellij(ctx)) return;
+    if (target?.mode === mode && target.ctx.cwd === ctx.cwd) return;
+    target = { ctx, mode };
+    stopSeenTimer();
+    pollDelayMs = firstPollDelayMs;
+    cancelRetry?.();
+    request(target);
+  }
+
+  return {
+    setMode,
     clearDone(ctx: ExtensionContext) {
-      if (target?.mode === "done") this.setMode(ctx, "base");
+      if (target?.mode === "done") setMode(ctx, "base");
     },
     close(): Promise<void> {
       if (shutdown) return shutdown;
       closing = true;
       pending = null;
-      stopTimer();
+      stopSeenTimer();
       cancelRetry?.();
       shutdown = (async () => {
         await worker;
-        // Do not discover tabs or refresh Git during teardown. Finish any
-        // issued write, then restore only the binding this instance owned.
-        const bound = bindings.current();
-        if (bound) await writer.rename(bound, bound.baseName, () => true);
+        const id = paneId();
+        if (published && id !== null) {
+          await send({
+            v: 1,
+            kind: "remove",
+            runtime_id: runtimeId,
+            seq: ++seq,
+            pane_id: id,
+          });
+        }
         bindings.clear();
         target = null;
       })();
