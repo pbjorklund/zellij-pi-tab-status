@@ -1,9 +1,10 @@
 import type { ExtensionContext, ToolExecutionEndEvent } from "@earendil-works/pi-coding-agent";
 import { isInteractiveZellij } from "./status-model.ts";
 
-const COMPLETION_TYPE = "pi-subagents-completion";
-const TERMINAL_STATES = new Set(["completed", "partial", "failed", "timed_out", "cancelled"]);
-const JOB_TOOLS = new Set(["subagent_spawn", "subagent_wait", "subagent_cancel", "subagent_inspect"]);
+const COMPLETION_TYPE = "subagent_result";
+const ACTIVE_STATES = new Set(["started", "running", "stopping"]);
+const TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
+const JOB_TOOLS = new Set(["subagent", "subagent_resume", "subagent_kill"]);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -14,9 +15,11 @@ type JobUpdate = { id: string; active: boolean };
 
 export function parseJobUpdate(value: unknown): JobUpdate | null {
   const job = record(value);
-  if (typeof job?.jobId !== "string" || !job.jobId.trim()) return null;
-  if (job.state === "queued" || job.state === "running") return { id: job.jobId, active: true };
-  if (typeof job.state === "string" && TERMINAL_STATES.has(job.state)) return { id: job.jobId, active: false };
+  const id = typeof job?.id === "string" ? job.id : job?.jobId;
+  if (typeof id !== "string" || !id.trim()) return null;
+  const state = typeof job.status === "string" ? job.status : job.state;
+  if (typeof state === "string" && ACTIVE_STATES.has(state)) return { id, active: true };
+  if (typeof state === "string" && TERMINAL_STATES.has(state)) return { id, active: false };
   return null;
 }
 
@@ -87,12 +90,7 @@ export function createSubagentJobObserver(
       if (closed || !isInteractiveZellij(context) || event.isError || !JOB_TOOLS.has(event.toolName)) return;
       ctx = context;
       const details = record(event.result)?.details;
-      if (event.toolName === "subagent_inspect") {
-        const jobs = record(details)?.jobs;
-        if (Array.isArray(jobs)) for (const job of jobs) observe(parseJobUpdate(job));
-      } else {
-        observe(parseJobUpdate(details));
-      }
+      observe(parseJobUpdate(details));
       readCompletions();
       schedule();
     },

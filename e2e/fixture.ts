@@ -47,7 +47,7 @@ export default function fixture(pi: ExtensionAPI) {
             : "";
           if (text === "hold") await gate("release-parent", options?.signal);
           if (text === "spawn") {
-            const toolCall = { type: "toolCall" as const, id: "call-child", name: "subagent_spawn", arguments: {} };
+            const toolCall = { type: "toolCall" as const, id: "call-child", name: "subagent", arguments: {} };
             output.content.push(toolCall);
             stream.push({ type: "toolcall_start", contentIndex: 0, partial: output });
             stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial: output });
@@ -72,10 +72,10 @@ export default function fixture(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "subagent_spawn", label: "Fixture child", description: "Return a queued child fixture.",
+    name: "subagent", label: "Fixture child", description: "Return a started child fixture.",
     parameters: Type.Object({}),
     async execute() {
-      return { content: [{ type: "text", text: "Child queued." }], details: { jobId: "modern-child", state: "queued" } };
+      return { content: [{ type: "text", text: "Child started." }], details: { id: "modern-child", status: "started" } };
     },
   });
   pi.registerCommand("fixture", {
@@ -83,8 +83,8 @@ export default function fixture(pi: ExtensionAPI) {
     async handler(args, ctx) {
       if (args === "legacy-start") pi.events.emit("subagents:started", { id: "legacy-child" });
       else if (args === "modern-complete") pi.sendMessage({
-        customType: "pi-subagents-completion", content: "Child completed.", display: false,
-        details: { jobId: "modern-child", state: "completed" },
+        customType: "subagent_result", content: "Child completed.", display: false,
+        details: { id: "modern-child", status: "completed" },
       }, { triggerTurn: false });
       else if (args === "shutdown") ctx.shutdown();
       else throw new Error(`Unknown fixture command: ${args}`);

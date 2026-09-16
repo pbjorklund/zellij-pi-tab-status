@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { flush, harness } from "./helpers/lifecycle.mjs";
 
-const jobResult = (jobId, state = "queued", toolName = "subagent_spawn") => ({
-  toolName, isError: false, result: { details: { jobId, state } },
+const jobResult = (id, status = "started", toolName = "subagent") => ({
+  toolName, isError: false, result: { details: { id, status } },
 });
-const completion = (jobId, state = "completed") => ({
-  type: "custom_message", customType: "pi-subagents-completion", details: { jobId, state },
+const completion = (id, status = "completed") => ({
+  type: "custom_message", customType: "subagent_result", details: { id, status },
 });
 const modes = (h) => h.pipes.flatMap((message) => message.kind === "snapshot" ? [message.mode] : []);
 
@@ -67,7 +67,7 @@ test("activity: same-mode subagent events repair a failed working snapshot", asy
   assert.equal(modes(h).at(-1), "done");
 });
 
-for (const state of ["completed", "partial", "failed", "timed_out", "cancelled"]) {
+for (const state of ["completed", "failed", "cancelled"]) {
   test(`activity: current child ${state} completion publishes done`, async (t) => {
     const h = harness(t);
     await h.emit("session_start");
@@ -77,17 +77,6 @@ for (const state of ["completed", "partial", "failed", "timed_out", "cancelled"]
     assert.equal(modes(h).at(-1), "done");
   });
 }
-
-test("activity: terminal inspect state completes a tracked job", async (t) => {
-  const h = harness(t);
-  await h.emit("session_start");
-  await h.emit("tool_execution_end", jobResult("job-one"));
-  await h.emit("tool_execution_end", {
-    toolName: "subagent_inspect", isError: false,
-    result: { details: { jobs: [{ jobId: "job-one", state: "completed" }] } },
-  });
-  assert.equal(modes(h).at(-1), "done");
-});
 
 test("activity: malformed and unrelated job events publish no extra status", async (t) => {
   const h = harness(t);
@@ -99,7 +88,7 @@ test("activity: malformed and unrelated job events publish no extra status", asy
     h.fire("subagents:failed", event);
   }
   h.fire("tool_execution_end", { ...jobResult("error"), isError: true });
-  h.fire("tool_execution_end", jobResult("unrelated", "queued", "bash"));
+  h.fire("tool_execution_end", jobResult("unrelated", "started", "bash"));
   await flush();
   assert.equal(h.pipes.length, before);
 });

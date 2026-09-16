@@ -2,28 +2,32 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseJobUpdate } from "../lib/subagent-jobs.ts";
 
-for (const [state, active] of [
-  ["queued", true], ["running", true], ["completed", false], ["partial", false],
-  ["failed", false], ["timed_out", false], ["cancelled", false],
+for (const [status, active] of [
+  ["started", true], ["running", true], ["stopping", true],
+  ["completed", false], ["failed", false], ["cancelled", false],
 ]) {
-  test(`job updates: ${state} has a known activity state`, () => {
-    assert.deepEqual(parseJobUpdate({ jobId: "child", state }), { id: "child", active });
+  test(`subagent updates: ${status} has a known activity state`, () => {
+    assert.deepEqual(parseJobUpdate({ id: "child", status }), { id: "child", active });
   });
 }
 
-test("job updates: malformed and unknown payloads cannot change activity", () => {
+test("subagent updates: legacy job-shaped data remains readable during transition", () => {
+  assert.deepEqual(parseJobUpdate({ jobId: "child", state: "running" }), { id: "child", active: true });
+});
+
+test("subagent updates: malformed and unknown payloads cannot change activity", () => {
   for (const value of [
-    null, undefined, 1, "child", [], {}, { jobId: "child" },
-    { jobId: "child", state: "unknown" }, { jobId: "child", state: true },
-    { jobId: 1, state: "queued" }, { jobId: " ", state: "queued" },
-    { jobId: "", state: "completed" }, { id: "legacy", state: "running" },
+    null, undefined, 1, "child", [], {}, { id: "child" },
+    { id: "child", status: "unknown" }, { id: "child", status: true },
+    { id: 1, status: "started" }, { id: " ", status: "started" },
+    { id: "", status: "completed" },
   ]) {
     assert.equal(parseJobUpdate(value), null, JSON.stringify(value));
   }
 });
 
-test("job updates: job identity is preserved without coercion or trimming", () => {
-  assert.deepEqual(parseJobUpdate({ jobId: " child ", state: "running", timedOut: true }), {
+test("subagent updates: identity is preserved without coercion or trimming", () => {
+  assert.deepEqual(parseJobUpdate({ id: " child ", status: "running", timedOut: true }), {
     id: " child ", active: true,
   });
 });

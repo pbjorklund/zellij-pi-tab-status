@@ -31,7 +31,7 @@ Run `pi update` or restart PI and approve package installation when prompted.
 - Maintains a static `repository/path:branch` tab title for Git worktrees, or the directory name elsewhere. It changes the title only when the base title changes.
 - Coalesces event bursts and treats Zellij commands as best effort, so status failures do not block PI lifecycle hooks.
 
-Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` job API (`subagent_spawn`, `subagent_wait`, `subagent_cancel`, and `subagent_inspect` results). For the job API, it reads new `pi-subagents-completion` entries from in-memory session history every 500 ms while jobs are active. This catches completions while the main agent is idle without reading session files or spawning status-frame processes.
+Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` named-agent tools (`subagent`, `subagent_resume`, and `subagent_kill`). It reads new `subagent_result` entries from in-memory session history every 500 ms while agents are active. This catches asynchronous completions while the parent is idle without reading session files or spawning status-frame processes.
 
 The extension needs PI 0.84.3 or newer and a Zellij version that provides `list-panes`, `list-tabs`, `rename-tab-by-id`, and `pipe`. Status markers require the matching custom sidebar; Zellij's built-in horizontal tab bar shows the static title only.
 
@@ -81,7 +81,7 @@ Each test starts a real PI TUI in a separate Zellij session with temporary confi
 - `controller.ts` coalesces semantic snapshots, sends pipes, maintains the static title, and orders teardown.
 - `tab-binding.ts` owns binding retries and title caching.
 - `ownership.ts` parses pane/tab data and selects the owner. `zellij.ts` reads Zellij state and writes static titles.
-- `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts the job API and reads idle completions.
+- `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts named-agent results and reads idle completions.
 - `status-model.ts` retains marker parsing compatibility for old titles; `tab-title.ts` derives Git/directory titles. `commands.ts` keeps stdout-reading commands captured, while `status-transport.ts` serializes status pipes with ignored stdio and a 150 ms deadline.
 
 ## License
