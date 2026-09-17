@@ -4,6 +4,8 @@ A PI extension that publishes agent state to the `zellij-tabbar` vertical sideba
 
 While PI works, the sidebar shows an animated spinner beside the owning tab. When a background run settles, it shows `●` until you view that tab. Spinner frames are rendered inside the sidebar; they do not rename the tab every 500 ms.
 
+Use it when PI runs inside Zellij with the matching custom vertical sidebar and background completion should stay visible across tabs. Do not use it outside a supported PI TUI, as a job audit log, or with Zellij's built-in tab bar when status markers are required.
+
 ## Install
 
 Install the matching [zellij-tabbar](https://github.com/pbjorklund/zellij-tabbar) WASM and layout first. Then add this Git package to `~/.pi/agent/settings.json`:
@@ -16,7 +18,9 @@ Install the matching [zellij-tabbar](https://github.com/pbjorklund/zellij-tabbar
 }
 ```
 
-Run `pi update` or restart PI and approve package installation when prompted.
+Run `pi update` or restart PI and approve package installation when prompted. No config file is required. `PI_SUBAGENT_ZELLIJ_PLACEMENT` belongs to `pi-subagents`, not this status extension.
+
+Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then reload PI. Remove the package with `pi remove git:github.com/pbjorklund/zellij-pi-tab-status`; remove the matching sidebar separately if nothing else uses it.
 
 ## Behavior
 
@@ -62,7 +66,7 @@ npm run test:coverage
 npm run eval
 ```
 
-CI enforces at least 95% aggregate line, branch, and function coverage across `pi-extension.ts` and `lib/*.ts`. The eval wrapper runs every test file, records no model output, and makes no network calls.
+CI enforces at least 95% aggregate line, branch, and function coverage across `pi-extension.ts` and `lib/*.ts`. The eval wrapper runs every test file, records no model output, and makes no network calls. Keep the status protocol synchronized with `zellij-tabbar` when changing message fields or lifecycle semantics.
 
 ### Live smoke and E2E tests
 
