@@ -1,19 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TabMode } from "./activity.ts";
+
 export type { TabMode } from "./activity.ts";
+
 import {
   defaultExecFileAsync,
   defaultSpawnIgnored,
   type ExecFileAsyncFn,
   type SpawnIgnoredFn,
 } from "./commands.ts";
-import { createStatusTransport } from "./status-transport.ts";
-import { createTabWriter, readTabByIdWith } from "./zellij.ts";
-import { createTabBinding } from "./tab-binding.ts";
 import { isInteractiveZellij } from "./status-model.ts";
+import { createStatusTransport } from "./status-transport.ts";
+import { createTabBinding } from "./tab-binding.ts";
+import { createTabWriter, readTabByIdWith } from "./zellij.ts";
 
 const RETRY_DELAY_MS = 100;
+const STATUS_REPLAY_INTERVAL_MS = 5_000;
 
 export type ZellijTabStatusOptions = {
   execFileAsync?: ExecFileAsyncFn;
@@ -22,10 +25,19 @@ export type ZellijTabStatusOptions = {
   runtimeId?: string;
   // Retained for callers that configured the former title-animation controller.
   spinnerIntervalMs?: number;
+  statusReplayIntervalMs?: number;
   seenPollFirstDelayMs?: number;
 };
 
 type Target = { ctx: ExtensionContext; mode: TabMode };
+type StatusSnapshot = {
+  v: 1;
+  kind: "snapshot";
+  runtime_id: string;
+  seq: number;
+  pane_id: number;
+  mode: TabMode;
+};
 
 export function createTabStatusController(options: ZellijTabStatusOptions = {}) {
   const baseExec = options.execFileAsync ?? defaultExecFileAsync;
@@ -38,6 +50,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   const now = options.now ?? Date.now;
   const runtimeId = options.runtimeId ?? randomUUID();
   const firstPollDelayMs = options.seenPollFirstDelayMs ?? 250;
+  const replayIntervalMs = options.statusReplayIntervalMs ?? STATUS_REPLAY_INTERVAL_MS;
   const writer = createTabWriter(exec, retryDelay);
   const bindings = createTabBinding(exec, now, retryDelay);
   let target: Target | null = null;
@@ -45,12 +58,14 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   let pending: Target | null = null;
   let cancelRetry: (() => void) | null = null;
   let seenTimer: ReturnType<typeof setTimeout> | null = null;
+  let replayTimer: ReturnType<typeof setTimeout> | null = null;
   let pollDelayMs = firstPollDelayMs;
   let closing = false;
   let shutdown: Promise<void> | null = null;
   let seq = 0;
   let snapshotAttempted = false;
   let delivered: Target | null = null;
+  let latestSnapshot: StatusSnapshot | null = null;
 
   const paneId = () => {
     const value = Number(process.env.ZELLIJ_PANE_ID);
@@ -74,18 +89,25 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     seenTimer = null;
   }
 
+  function stopReplayTimer() {
+    if (replayTimer !== null) clearTimeout(replayTimer);
+    replayTimer = null;
+  }
+
   async function publish(snapshot: Target) {
     const id = paneId();
     if (id === null || !isInteractiveZellij(snapshot.ctx)) return false;
     snapshotAttempted = true;
-    const sent = await statusTransport.send({
+    const message: StatusSnapshot = {
       v: 1,
       kind: "snapshot",
       runtime_id: runtimeId,
       seq: ++seq,
       pane_id: id,
       mode: snapshot.mode,
-    });
+    };
+    latestSnapshot = message;
+    const sent = await statusTransport.send(message);
     if (sent) delivered = snapshot;
     return sent;
   }
@@ -109,6 +131,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
         pending = null;
         const sent = await publish(next);
         if (sent && pending === next) pending = null;
+        if (target === next && pending === null) scheduleReplay();
         await refreshStaticTitle(next);
       }
     }).catch(() => {
@@ -116,8 +139,24 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
     }).finally(() => {
       worker = null;
       if (pending && !closing) request(pending);
-      else scheduleSeenPoll();
+      else {
+        scheduleReplay();
+        scheduleSeenPoll();
+      }
     });
+  }
+
+  function scheduleReplay() {
+    if (closing || replayTimer !== null || target?.mode === "base" || latestSnapshot === null) return;
+    const snapshot = target;
+    const message = latestSnapshot;
+    replayTimer = setTimeout(async () => {
+      replayTimer = null;
+      // Existing sidebars ignore this sequence; newly loaded instances accept it.
+      await statusTransport.send(message);
+      if (!closing && target === snapshot && latestSnapshot === message) scheduleReplay();
+    }, replayIntervalMs);
+    replayTimer.unref?.();
   }
 
   function scheduleSeenPoll() {
@@ -141,11 +180,15 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   function setMode(ctx: ExtensionContext, mode: TabMode) {
     if (closing || !isInteractiveZellij(ctx)) return;
     if (target?.mode === mode && target.ctx.cwd === ctx.cwd) {
-      if (delivered !== target) request(target);
+      if (delivered !== target) {
+        stopReplayTimer();
+        request(target);
+      }
       return;
     }
     target = { ctx, mode };
     stopSeenTimer();
+    stopReplayTimer();
     pollDelayMs = firstPollDelayMs;
     cancelRetry?.();
     request(target);
@@ -161,6 +204,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       closing = true;
       pending = null;
       stopSeenTimer();
+      stopReplayTimer();
       cancelRetry?.();
       commandAbort.abort();
       shutdown = (async () => {

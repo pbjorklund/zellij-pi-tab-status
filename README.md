@@ -25,7 +25,7 @@ Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then rel
 ## Behavior
 
 - Runs only in PI's TUI inside Zellij.
-- Sends a complete `pi_status` snapshot when state changes; it sends no animation frames.
+- Sends a complete `pi_status` snapshot when state changes, then replays the same active snapshot every five seconds so newly loaded sidebars catch up. It sends no animation frames.
 - Uses the stable Zellij pane ID, a runtime ID, and a monotonic sequence so moved panes and stale updates remain distinguishable.
 - Keeps the parent and tracked subagent state working until all work settles.
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
@@ -54,7 +54,7 @@ The extension broadcasts version 1 JSON through `zellij pipe --name pi_status`. 
 }
 ```
 
-`mode` is `base`, `working`, `compacting`, or `done`. Shutdown sends `kind: "remove"` with the same identity fields and no mode. Messages contain no prompt, command, cwd, tool argument, or conversation content.
+`mode` is `base`, `working`, `compacting`, or `done`. Active `working`, `compacting`, and `done` snapshots are replayed with the same sequence number; existing sidebars ignore the duplicate while new sidebars accept it. Shutdown sends `kind: "remove"` with the same identity fields and no mode. Messages contain no prompt, command, cwd, tool argument, or conversation content.
 
 ## Development
 
@@ -82,7 +82,7 @@ Each test starts a real PI TUI in a separate Zellij session with temporary confi
 ### Structure
 
 - `pi-extension.ts` registers lifecycle handlers.
-- `controller.ts` coalesces semantic snapshots, sends pipes, maintains the static title, and orders teardown.
+- `controller.ts` coalesces lifecycle changes, replays active status for new sidebars, maintains the static title, and orders shutdown.
 - `tab-binding.ts` owns binding retries and title caching.
 - `ownership.ts` parses pane/tab data and selects the owner. `zellij.ts` reads Zellij state and writes static titles.
 - `activity.ts` owns parent, child, and compaction transitions. `subagent-jobs.ts` adapts named-agent results and reads idle completions.

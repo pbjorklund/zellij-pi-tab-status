@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "privacy": "public",
   "cases": [
     {
@@ -15,10 +15,10 @@
       "expected_test": "publisher: duplicate modes are coalesced and shutdown removes only its runtime"
     },
     {
-      "id": "no-animation-processes",
+      "id": "replay-active-status-without-title-animation",
       "layer": 2,
-      "category": "performance",
-      "expected_test": "perf: active work has no transport or title animation timer"
+      "category": "recovery",
+      "expected_test": "replay: active work republishes the same snapshot for new sidebars"
     },
     {
       "id": "burst-latest-state",

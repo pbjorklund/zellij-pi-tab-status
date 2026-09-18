@@ -51,6 +51,69 @@ test("scheduling: repeated same-mode subagent events add no transport", async (t
   assert.equal(modes(h).at(-1), "done");
 });
 
+test("scheduling: title discovery cannot delay active status replay", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  const held = h.hold((_command, args) => args[1] === "list-panes");
+  h.fire("agent_start");
+  await held.entered.promise;
+  const working = h.pipes.at(-1);
+
+  await h.tick(5);
+
+  assert.deepEqual(h.pipes.slice(-2), [working, working]);
+  held.release.resolve();
+  await flush();
+});
+
+test("scheduling: replay follows the latest semantic state", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  await h.start();
+  await h.emit("session_before_compact");
+  const compacting = h.pipes.at(-1);
+
+  await h.tick(5);
+
+  assert.deepEqual(h.pipes.slice(-2), [compacting, compacting]);
+});
+
+test("scheduling: a failed replay retries the same snapshot", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  await h.start();
+  const working = h.pipes.at(-1);
+  h.failPipes(1);
+
+  await h.tick(5);
+  assert.equal(h.pipes.filter(({ mode }) => mode === "working").length, 1);
+  await h.tick(5);
+
+  assert.deepEqual(h.pipes.slice(-2), [working, working]);
+});
+
+test("scheduling: same-mode repair replaces a failed snapshot replay", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  await h.emit("session_start");
+  h.failPipes(1);
+  await h.emit("agent_start");
+  await h.emit("subagents:started", { id: "child" });
+  const repaired = h.pipes.at(-1);
+
+  await h.tick(5);
+  await h.tick(5);
+
+  assert.deepEqual(h.pipes.slice(-3), [repaired, repaired, repaired]);
+});
+
+test("scheduling: shutdown cancels active status replay", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  await h.start();
+  await h.fire("session_shutdown");
+  const count = h.calls.length;
+
+  await h.tick(60_000);
+
+  assert.equal(h.calls.length, count);
+});
+
 test("scheduling: shutdown cancels discovery retries and publishes one removal", async (t) => {
   const h = harness(t, { runtimeId: "closing" });
   h.setPaneOutput("not json");

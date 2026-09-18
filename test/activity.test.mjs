@@ -11,13 +11,15 @@ const completion = (id, status = "completed") => ({
 const modes = (h) => h.pipes.flatMap((message) => message.kind === "snapshot" ? [message.mode] : []);
 
 for (const reason of ["threshold", "overflow", "manual"]) {
-  test(`activity: ${reason} compaction publishes transitions without frame traffic`, async (t) => {
+  test(`activity: ${reason} compaction replays status without title frame traffic`, async (t) => {
     const h = harness(t);
     await h.emit("session_start");
     await h.emit("session_before_compact", { reason, willRetry: false });
-    const calls = h.calls.length;
+    const compacting = h.pipes.at(-1);
+    const writes = h.writes.length;
     await h.tick(5_000);
-    assert.equal(h.calls.length, calls);
+    assert.deepEqual(h.pipes.slice(-2), [compacting, compacting]);
+    assert.equal(h.writes.length, writes);
     await h.emit("session_compact", { reason, willRetry: false });
     assert.deepEqual(modes(h).slice(-2), ["compacting", "base"]);
   });

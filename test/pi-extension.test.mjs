@@ -23,14 +23,26 @@ test("lifecycle: failed compaction restores the effective work state", async (t)
   assert.deepEqual(modes(h).slice(-2), ["compacting", "working"]);
 });
 
-test("perf: active work has no transport or title animation timer", async (t) => {
-  const h = harness(t);
+test("replay: active work republishes the same snapshot for new sidebars", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
   await h.start();
-  const calls = h.calls.length;
+  const working = h.pipes.at(-1);
   const writes = h.writes.length;
-  await h.tick(60_000);
-  assert.equal(h.calls.length, calls);
+
+  await h.tick(5);
+
+  assert.deepEqual(h.pipes.slice(-2), [working, working]);
   assert.equal(h.writes.length, writes);
+});
+
+test("replay: base state produces no periodic transport", async (t) => {
+  const h = harness(t, { statusReplayIntervalMs: 5 });
+  await h.emit("session_start");
+  const calls = h.calls.length;
+
+  await h.tick(60_000);
+
+  assert.equal(h.calls.length, calls);
 });
 
 test("perf: transitions within the binding TTL do not repeat discovery or Git reads", async (t) => {
