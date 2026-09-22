@@ -37,7 +37,7 @@ Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then rel
 
 Subagent tracking supports both the `subagents:started` / `subagents:completed` / `subagents:failed` event bus (payload: `{ id }`) and the `@narumitw/pi-subagents` named-agent tools (`subagent`, `subagent_resume`, and `subagent_kill`). It reads new `subagent_result` entries from in-memory session history every 500 ms while agents are active. This catches asynchronous completions while the parent is idle without reading session files or spawning status-frame processes.
 
-The extension needs PI 0.84.3 or newer and a Zellij version that provides `list-panes`, `list-tabs`, `rename-tab-by-id`, and `pipe`. Status markers require the matching custom sidebar; Zellij's built-in horizontal tab bar shows the static title only.
+The extension needs PI 0.87.0 or newer and a Zellij version that provides `list-panes`, `list-tabs`, `rename-tab-by-id`, and `pipe`. Status markers require the matching custom sidebar; Zellij's built-in horizontal tab bar shows the static title only.
 
 ## Status protocol
 
