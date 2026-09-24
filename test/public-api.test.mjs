@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import * as status from "../pi-extension.ts";
+
+test("package uses the pi-zellij-tab-status Git source without a slash command", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.equal(manifest.name, "pi-zellij-tab-status");
+  assert.equal(manifest.repository.url, "git+ssh://git@github.com/pbjorklund/pi-zellij-tab-status.git");
+  assert.deepEqual(manifest.pi.extensions, ["./pi-extension.ts"]);
+  assert.match(readme, /pi update git:github\.com\/pbjorklund\/pi-zellij-tab-status/);
+  assert.doesNotMatch(readme, /pbjorklund\/zellij-pi-tab-status/);
+});
 
 test("stripPiTabPrefix removes working, compacting, and done overlays", () => {
   assert.equal(status.stripPiTabPrefix("⠋ repo/path:branch"), "repo/path:branch");

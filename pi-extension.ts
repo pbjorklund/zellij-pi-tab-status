@@ -14,8 +14,11 @@ export {
 export { parseSubagentId, createWorkTracker } from "./lib/activity.ts";
 
 const WATCHERS = [
-  ["watcher:cw", "C"], ["watcher:iw", "I"], ["watcher:pw", "P"],
-  ["watcher:rw", "R"], ["watcher:sw", "S"],
+  ["C", "watcher:af-watch-checklist", "watcher:cw"],
+  ["I", "watcher:af-watch-improvement", "watcher:iw"],
+  ["P", "watcher:af-watch-project-task", "watcher:pw"],
+  ["R", "watcher:watch-github-pr", "watcher:rw"],
+  ["S", "watcher:watch-sentry", "watcher:sw"],
 ] as const;
 
 export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabStatusOptions = {}) {
@@ -23,16 +26,17 @@ export default function zellijPiTabStatus(pi: ExtensionAPI, options: ZellijTabSt
   const activity = createActivityState();
   let currentCtx: ExtensionContext | null = null;
   let closed = false;
-  const activeWatchers = new Set<string>();
+  const watcherStatuses = new Map<string, string>();
 
   pi.events?.on?.("watcher:status", (data: unknown) => {
     if (closed || !data || typeof data !== "object") return;
     const { key, status } = data as { key?: unknown; status?: unknown };
-    if (!WATCHERS.some(([known]) => known === key) || typeof status !== "string" ||
+    if (!WATCHERS.some(([, canonical, legacy]) => canonical === key || legacy === key) || typeof status !== "string" ||
       !["off", "polling", "queued", "working", "waiting", "paused", "error"].includes(status)) return;
-    if (status === "off") activeWatchers.delete(key as string);
-    else activeWatchers.add(key as string);
-    controller.setWatchers(currentCtx, WATCHERS.filter(([known]) => activeWatchers.has(known)).map(([, letter]) => letter).join(""));
+    watcherStatuses.set(key as string, status);
+    controller.setWatchers(currentCtx, WATCHERS.filter(([, canonical, legacy]) =>
+      (watcherStatuses.get(canonical) ?? watcherStatuses.get(legacy) ?? "off") !== "off",
+    ).map(([letter]) => letter).join(""));
   });
 
   function showActivity(ctx: ExtensionContext, mode: TabMode) {

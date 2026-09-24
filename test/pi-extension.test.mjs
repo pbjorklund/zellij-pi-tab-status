@@ -45,6 +45,33 @@ test("replay: base state produces no periodic transport", async (t) => {
   assert.equal(h.calls.length, calls);
 });
 
+test("renamed watcher identities preserve one sorted letter each and canonical off overrides stale aliases", async (t) => {
+  const h = harness(t, { runtimeId: "renamed-watchers" });
+  await h.emit("session_start");
+  const pairs = [
+    ["watcher:cw", "watcher:af-watch-checklist", "C"],
+    ["watcher:iw", "watcher:af-watch-improvement", "I"],
+    ["watcher:pw", "watcher:af-watch-project-task", "P"],
+    ["watcher:rw", "watcher:watch-github-pr", "R"],
+    ["watcher:sw", "watcher:watch-sentry", "S"],
+  ];
+  for (const [legacy, canonical] of pairs) {
+    await h.emit("watcher:status", { key: legacy, status: "working" });
+    await h.emit("watcher:status", { key: canonical, status: "working" });
+  }
+  assert.equal(h.pipes.at(-1).watchers, "CIPRS");
+  for (const [, canonical] of pairs) await h.emit("watcher:status", { key: canonical, status: "off" });
+  assert.equal(h.pipes.at(-1).watchers, undefined);
+  for (const [legacy, canonical, letter] of pairs) {
+    await h.emit("watcher:status", { key: legacy, status: "working" });
+    assert.equal(h.pipes.at(-1).watchers, undefined, `${letter} must not reappear from a stale alias`);
+    await h.emit("watcher:status", { key: canonical, status: "paused" });
+    assert.equal(h.pipes.at(-1).watchers, letter);
+    await h.emit("watcher:status", { key: canonical, status: "off" });
+  }
+  assert.equal(h.pipes.at(-1).watchers, undefined);
+});
+
 test("watcher events publish sorted letters and clear them without changing the agent mode", async (t) => {
   const h = harness(t, { runtimeId: "watch-test", statusReplayIntervalMs: 5 });
   await h.emit("session_start");

@@ -1,5 +1,5 @@
 {
-  "name": "zellij-pi-tab-status",
+  "name": "pi-zellij-tab-status",
   "version": "0.3.1",
   "type": "module",
   "description": "Publish PI activity and unseen completion to the Zellij vertical sidebar.",
@@ -25,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/pbjorklund/zellij-pi-tab-status.git"
+    "url": "git+ssh://git@github.com/pbjorklund/pi-zellij-tab-status.git"
   },
   "bugs": {
-    "url": "https://github.com/pbjorklund/zellij-pi-tab-status/issues"
+    "url": "https://github.com/pbjorklund/pi-zellij-tab-status/issues"
   },
-  "homepage": "https://github.com/pbjorklund/zellij-pi-tab-status#readme",
+  "homepage": "https://github.com/pbjorklund/pi-zellij-tab-status#readme",
   "pi": {
     "extensions": [
       "./pi-extension.ts"

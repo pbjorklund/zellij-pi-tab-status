@@ -1,4 +1,4 @@
-# zellij-pi-tab-status
+# pi-zellij-tab-status
 
 A PI extension that publishes agent state to the `zellij-tabbar` vertical sidebar.
 
@@ -13,14 +13,14 @@ Install the matching [zellij-tabbar](https://github.com/pbjorklund/zellij-tabbar
 ```json
 {
   "packages": [
-    "git:github.com/pbjorklund/zellij-pi-tab-status"
+    "git:github.com/pbjorklund/pi-zellij-tab-status"
   ]
 }
 ```
 
 Run `pi update` or restart PI and approve package installation when prompted. No config file is required. `PI_SUBAGENT_ZELLIJ_PLACEMENT` belongs to `pi-subagents`, not this status extension.
 
-Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then reload PI. Remove the package with `pi remove git:github.com/pbjorklund/zellij-pi-tab-status`; remove the matching sidebar separately if nothing else uses it.
+Update with `pi update git:github.com/pbjorklund/pi-zellij-tab-status`, then reload PI. Remove the package with `pi remove git:github.com/pbjorklund/pi-zellij-tab-status`; remove the matching sidebar separately if nothing else uses it.
 
 ## Behavior
 
@@ -31,7 +31,7 @@ Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then rel
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
 - Publishes `compacting` during manual and automatic compaction, then restores the effective state after success, failure, or cancellation.
 - Publishes `done` once the parent has settled and all tracked subagents have finished. The visible sidebar clears it immediately; the extension confirms tab visibility with bounded backoff and publishes `base` so every sidebar instance converges.
-- Adds optional watch letters after the sidebar tab name: checklist `C`, improvement `I`, project tasks `P`, GitHub review `R`, and Sentry `S`. Enabled watchers appear in `CIPRS` order, including while waiting, paused, or in error. The spinner and unseen-completion marker remain independent.
+- Adds optional watch letters after the sidebar tab name: checklist `C`, improvement `I`, project tasks `P`, GitHub review `R`, and Sentry `S`. Enabled watchers appear in `CIPRS` order, including while waiting, paused, or in error. The spinner and unseen-completion marker remain independent. Canonical `watcher:af-watch-*` and `watcher:watch-*` events take precedence over legacy `watcher:cw/iw/pw/rw/sw` events for each letter; a canonical `off` stops stale legacy events from reviving a marker during rollout.
 - Publishes a runtime-specific removal during shutdown.
 - Maintains a static `repository/path:branch` tab title for Git worktrees, or the directory name elsewhere. It changes the title only when the base title changes.
 - Coalesces event bursts and treats Zellij commands as best effort, so status failures do not block PI lifecycle hooks.
