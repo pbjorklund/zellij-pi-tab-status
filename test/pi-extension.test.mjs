@@ -45,6 +45,25 @@ test("replay: base state produces no periodic transport", async (t) => {
   assert.equal(h.calls.length, calls);
 });
 
+test("watcher events publish sorted letters and clear them without changing the agent mode", async (t) => {
+  const h = harness(t, { runtimeId: "watch-test", statusReplayIntervalMs: 5 });
+  await h.emit("session_start");
+  await h.emit("watcher:status", { key: "watcher:sw", status: "working" });
+  await h.emit("watcher:status", { key: "watcher:cw", status: "polling" });
+  assert.equal(h.pipes.at(-1).mode, "base");
+  assert.equal(h.pipes.at(-1).watchers, "CS");
+  const count = h.pipes.length;
+  await h.emit("watcher:status", { key: "watcher:cw", status: "polling" });
+  await h.emit("watcher:status", { key: "not-a-watcher", status: "working" });
+  assert.equal(h.pipes.length, count);
+  await h.tick(5);
+  assert.deepEqual(h.pipes.at(-1), h.pipes.at(-2), "base watcher status is replayed for a late sidebar");
+  await h.emit("watcher:status", { key: "watcher:sw", status: "off" });
+  assert.equal(h.pipes.at(-1).watchers, "C");
+  await h.emit("watcher:status", { key: "watcher:cw", status: "off" });
+  assert.equal(h.pipes.at(-1).watchers, undefined);
+});
+
 test("perf: transitions within the binding TTL do not repeat discovery or Git reads", async (t) => {
   const h = harness(t);
   await h.start();

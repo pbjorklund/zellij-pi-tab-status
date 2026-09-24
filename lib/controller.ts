@@ -29,7 +29,7 @@ export type ZellijTabStatusOptions = {
   seenPollFirstDelayMs?: number;
 };
 
-type Target = { ctx: ExtensionContext; mode: TabMode };
+type Target = { ctx: ExtensionContext; mode: TabMode; watchers: string };
 type StatusSnapshot = {
   v: 1;
   kind: "snapshot";
@@ -37,6 +37,7 @@ type StatusSnapshot = {
   seq: number;
   pane_id: number;
   mode: TabMode;
+  watchers?: string;
 };
 
 export function createTabStatusController(options: ZellijTabStatusOptions = {}) {
@@ -66,6 +67,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   let snapshotAttempted = false;
   let delivered: Target | null = null;
   let latestSnapshot: StatusSnapshot | null = null;
+  let watchers = "";
 
   const paneId = () => {
     const value = Number(process.env.ZELLIJ_PANE_ID);
@@ -105,6 +107,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
       seq: ++seq,
       pane_id: id,
       mode: snapshot.mode,
+      ...(snapshot.watchers ? { watchers: snapshot.watchers } : {}),
     };
     latestSnapshot = message;
     const sent = await statusTransport.send(message);
@@ -147,7 +150,7 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
   }
 
   function scheduleReplay() {
-    if (closing || replayTimer !== null || target?.mode === "base" || latestSnapshot === null) return;
+    if (closing || replayTimer !== null || (target?.mode === "base" && !target.watchers) || latestSnapshot === null) return;
     const snapshot = target;
     const message = latestSnapshot;
     replayTimer = setTimeout(async () => {
@@ -179,14 +182,14 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   function setMode(ctx: ExtensionContext, mode: TabMode) {
     if (closing || !isInteractiveZellij(ctx)) return;
-    if (target?.mode === mode && target.ctx.cwd === ctx.cwd) {
+    if (target?.mode === mode && target.watchers === watchers && target.ctx.cwd === ctx.cwd) {
       if (delivered !== target) {
         stopReplayTimer();
         request(target);
       }
       return;
     }
-    target = { ctx, mode };
+    target = { ctx, mode, watchers };
     stopSeenTimer();
     stopReplayTimer();
     pollDelayMs = firstPollDelayMs;
@@ -196,6 +199,11 @@ export function createTabStatusController(options: ZellijTabStatusOptions = {}) 
 
   return {
     setMode,
+    setWatchers(ctx: ExtensionContext | null, value: string) {
+      if (closing || watchers === value) return;
+      watchers = value;
+      if (ctx && target) setMode(ctx, target.mode);
+    },
     clearDone(ctx: ExtensionContext) {
       if (target?.mode === "done") setMode(ctx, "base");
     },

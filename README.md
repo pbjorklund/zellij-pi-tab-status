@@ -31,6 +31,7 @@ Update with `pi update git:github.com/pbjorklund/zellij-pi-tab-status`, then rel
 - Keeps work marked across automatic retries, queued follow-ups, and compaction recovery.
 - Publishes `compacting` during manual and automatic compaction, then restores the effective state after success, failure, or cancellation.
 - Publishes `done` once the parent has settled and all tracked subagents have finished. The visible sidebar clears it immediately; the extension confirms tab visibility with bounded backoff and publishes `base` so every sidebar instance converges.
+- Adds optional watch letters after the sidebar tab name: checklist `C`, improvement `I`, project tasks `P`, GitHub review `R`, and Sentry `S`. Enabled watchers appear in `CIPRS` order, including while waiting, paused, or in error. The spinner and unseen-completion marker remain independent.
 - Publishes a runtime-specific removal during shutdown.
 - Maintains a static `repository/path:branch` tab title for Git worktrees, or the directory name elsewhere. It changes the title only when the base title changes.
 - Coalesces event bursts and treats Zellij commands as best effort, so status failures do not block PI lifecycle hooks.
@@ -54,7 +55,7 @@ The extension broadcasts version 1 JSON through `zellij pipe --name pi_status`. 
 }
 ```
 
-`mode` is `base`, `working`, `compacting`, or `done`. Active `working`, `compacting`, and `done` snapshots are replayed with the same sequence number; existing sidebars ignore the duplicate while new sidebars accept it. Shutdown sends `kind: "remove"` with the same identity fields and no mode. Messages contain no prompt, command, cwd, tool argument, or conversation content.
+`mode` is `base`, `working`, `compacting`, or `done`. An optional `watchers` string holds enabled letters in `CIPRS` order; it is omitted when no watcher is enabled. Snapshots with active work, unseen completion, or watchers are replayed with the same sequence number; existing sidebars ignore the duplicate while new sidebars accept it. Shutdown sends `kind: "remove"` with the same identity fields and no mode. Messages contain no prompt, command, cwd, tool argument, or conversation content.
 
 ## Development
 
